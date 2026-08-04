@@ -28,6 +28,7 @@ Collections used (created lazily by Mongo on first insert):
 
 import os
 import random
+import re
 from datetime import datetime, timezone
 
 from bson import ObjectId
@@ -255,12 +256,161 @@ def check_and_generate_cohort(db, student_id):
             "cohortAssignedFrom": "assessment_plus_interview",
         }},
     )
+    sync_student_cohort_record(db, student_id, new_cohort, final_score, "assessment_plus_interview")
     return new_cohort
 
 
 RESULT_STATUS_PENDING = "Interview Pending"
 RESULT_STATUS_INTERVIEW_DONE = "Interview Completed"
 RESULT_STATUS_VALIDATED = "Validated"
+
+
+# ------------------------------------------------------------
+# Part 5 — dedicated StudentCohort collection (db.student_cohort).
+#
+# db.users.cohort remains the single field every eligibility check in
+# this codebase already reads (quiz_module, student.py, cohort_counts,
+# etc.) — this collection is a deliberate ADDITIVE mirror of it, not a
+# replacement, so nothing that already depends on db.users.cohort needs
+# to change or risks reading a second, possibly-out-of-sync source.
+# It exists so a caller that only cares about "current cohort + the
+# score that produced it" (e.g. a reporting/export job) doesn't need to
+# reconstruct that from db.users' broader profile fields, and so cohort
+# history is queryable/indexable on its own without touching db.users.
+# ------------------------------------------------------------
+def sync_student_cohort_record(db, student_id, cohort, average_score, source):
+    """Upserts db.student_cohort with this student's current cohort —
+    always called immediately after db.users.cohort is written, from the
+    same function, so the two can never drift apart."""
+    student = db.users.find_one({"_id": student_id}) or {}
+    db.student_cohort.update_one(
+        {"studentId": student_id},
+        {"$set": {
+            "studentId": student_id,
+            "rollNumber": student.get("rollNumber"),
+            "averageScore": average_score,
+            "cohort": cohort,
+            "lastUpdated": now(),
+            "source": source,
+        }},
+        upsert=True,
+    )
+
+
+def recompute_cohort_from_quiz_results(db, student_id):
+    """
+    ROOT-CAUSE FIX: set_quiz_interview_marks()/validate_quiz_result()
+    (the Create-Quiz Interview/Validator Verification workflow) computed
+    and stored `assignedCohort` on each individual quiz_attempts document
+    — but never wrote it back to db.users.cohort, the ONE field every
+    quiz-eligibility check in this codebase actually reads
+    (student_matches_cohort_target). A student could be fully validated
+    into Cohort B here and still never see a Cohort-B-targeted quiz,
+    because their actual account-level cohort never moved off Entry
+    Level (or whatever the older baseline-assessment/interview engine
+    had last set it to).
+
+    Called every time a Create-Quiz result is validated. Recomputes this
+    student's cohort from the AVERAGE Final Average across every one of
+    their Validated results (spec: "cohort determination depends upon
+    average assessment score") — not just the single most-recently
+    validated quiz — then commits it as their authoritative cohort and
+    mirrors it into db.student_cohort (Part 5).
+
+    Precedence: if this student's cohort was already assigned by the
+    older, dedicated baseline-assessment+interview engine
+    (`cohortAssignedFrom == "assessment_plus_interview"`), that engine's
+    result is left alone — it's the more deliberate, single-purpose
+    signal, and silently overwriting it every time an unrelated
+    Create-Quiz result gets validated would be its own bug. This function
+    only ever sets/updates a cohort that either doesn't exist yet or was
+    itself last set by this same Create-Quiz path.
+
+    Returns the new cohort string, or None if the student has no
+    Validated Create-Quiz results yet, or their cohort is "owned" by the
+    other engine.
+    """
+    student = db.users.find_one({"_id": student_id}, {"cohortAssignedFrom": 1}) or {}
+    if student.get("cohortAssignedFrom") == "assessment_plus_interview":
+        return None
+    validated = list(db.quiz_attempts.find({
+        "studentId": student_id,
+        "resultStatus": RESULT_STATUS_VALIDATED,
+        "finalAverage": {"$ne": None},
+    }))
+    if not validated:
+        return None
+    average_score = round(sum(a["finalAverage"] for a in validated) / len(validated), 2)
+    cohort = cohort_from_score(db, average_score)
+    db.users.update_one(
+        {"_id": student_id},
+        {"$set": {
+            "cohort": cohort,
+            "finalEmployabilityScore": average_score,
+            "cohortAssignedAt": now(),
+            "cohortAssignedFrom": "quiz_validation_average",
+        }},
+    )
+    sync_student_cohort_record(db, student_id, cohort, average_score, "quiz_validation_average")
+    return cohort
+
+
+def backfill_student_cohorts(db):
+    """
+    SYNCHRONIZE EXISTING DATA (spec Part 5): a retroactive, idempotent
+    fix for every student whose data predates this bug fix.
+
+    Two groups of students needed this:
+    1. Anyone with a Validated Create-Quiz result recorded BEFORE
+       recompute_cohort_from_quiz_results() existed — their
+       quiz_attempts document has an `assignedCohort`, but it was never
+       propagated to db.users.cohort, so they were (and, until this
+       backfill runs, still are) invisible to cohort-targeted quizzes
+       despite their own Quiz History page correctly showing "Cohort B".
+       Re-running recompute_cohort_from_quiz_results() for each of them
+       fixes exactly that.
+    2. Anyone whose cohort was already correct in db.users (from either
+       engine) but has no db.student_cohort record yet, because that
+       collection didn't exist when they were assigned — mirrored in
+       without touching db.users at all.
+
+    Safe to run any number of times: every write here is either a no-op
+    (a student who's already fully in sync) or a strict correction (a
+    stale/missing value getting fixed) — never a regression, thanks to
+    recompute_cohort_from_quiz_results()'s own precedence guard, which
+    this function relies on rather than duplicates.
+
+    Call this once, manually, right after deploying this fix (see
+    POST /admin/student-cohort/backfill) — not automatically on every
+    app startup, so it stays visible/auditable rather than silently
+    re-running against a growing dataset on every deploy.
+
+    Returns a small summary dict: {"promoted", "mirroredOnly", "checked"}.
+    """
+    promoted = 0    # db.users.cohort actually changed — these are the
+                    # students the original bug was hiding quizzes from
+    checked_ids = set(db.quiz_attempts.distinct(
+        "studentId", {"resultStatus": RESULT_STATUS_VALIDATED, "finalAverage": {"$ne": None}},
+    ))
+    for sid in checked_ids:
+        before = db.users.find_one({"_id": sid}, {"cohort": 1})
+        before_cohort = (before or {}).get("cohort")
+        after_cohort = recompute_cohort_from_quiz_results(db, sid)
+        if after_cohort and after_cohort != before_cohort:
+            promoted += 1
+
+    mirrored = 0
+    for student in db.users.find({"role": "student", "cohort": {"$in": list(VALID_COHORTS)}}):
+        if db.student_cohort.find_one({"studentId": student["_id"]}):
+            continue
+        sync_student_cohort_record(
+            db, student["_id"], student["cohort"],
+            student.get("finalEmployabilityScore"),
+            student.get("cohortAssignedFrom") or "backfill",
+        )
+        mirrored += 1
+
+    return {"promoted": promoted, "mirroredOnly": mirrored, "checked": len(checked_ids)}
 
 
 def init_quiz_result_fields():
@@ -277,6 +427,128 @@ def init_quiz_result_fields():
         "validatedBy": None,
         "validatedAt": None,
     }
+
+
+# ------------------------------------------------------------
+# Overall Score / Overall Cohort / Placement Readiness — SINGLE SOURCE
+# OF TRUTH, shared by every route (Dashboard Home, My Cohort, Placement
+# Readiness) that needs to show these numbers. Nothing about this is
+# ever computed on the frontend — every caller gets the same already-
+# computed dict back from compute_overall_performance() below.
+#
+# Definition (matches "Overall Cohort Calculation" spec exactly):
+#   - A per-quiz "Final Percentage Score" + "Cohort" only exist once
+#     interview marks have been entered for that quiz_attempts doc —
+#     see set_quiz_interview_marks() above, which sets finalAverage +
+#     assignedCohort together, and flips resultStatus away from
+#     RESULT_STATUS_PENDING ("Interview Pending"). So "completed /
+#     validated" here means resultStatus in (Interview Completed,
+#     Validated); "Interview Pending" (finalAverage still None) is
+#     exactly the "pending" case the spec says to ignore.
+#   - Overall Score = plain average of finalAverage across every
+#     completed result for this student (no weighting — "(62+95)/2"
+#     in the spec, not a re-weighted formula).
+#   - Overall Cohort = cohort_from_score() of that Overall Score,
+#     using the CURRENT db.placement_rules bands — i.e. the exact same
+#     mapping rule already used everywhere else, never a second set of
+#     thresholds invented just for this feature.
+# ------------------------------------------------------------
+def top_cohort_label(db):
+    """Whichever cohort currently has the highest 'min' threshold in
+    db.placement_rules.cohortRanges is the platform's top / readiest
+    band right now (e.g. 'A' with the default seed). Never hardcoded
+    to the literal letter 'A' — if a Super Admin ever re-labels or
+    re-orders the bands, this keeps tracking whichever one is actually
+    highest, exactly as configured."""
+    rules = get_placement_rules(db)
+    bands = rules.get("cohortRanges", [])
+    if not bands:
+        return "A"
+    return max(bands, key=lambda b: b["min"])["cohort"]
+
+
+def compute_placement_readiness(db, overall_score, overall_cohort):
+    """Placement Readiness = Overall Score + Overall Cohort, judged
+    against the Super Admin's own placement-readiness rules (the same
+    db.placement_rules cohort bands used everywhere else) — a student
+    is 'Ready' once their Overall Cohort is the platform's current top
+    band. No separate readiness threshold is invented here; the bands
+    a Super Admin already configures ARE the placement-readiness rule."""
+    top = top_cohort_label(db)
+    ready = overall_cohort is not None and overall_cohort == top
+    if overall_score is None:
+        summary = ("Complete at least one fully validated assessment "
+                    "(quiz score + interview) to see your Placement Readiness.")
+    elif ready:
+        summary = f"You're in Cohort {overall_cohort} — the platform's top readiness band. You're Placement Ready."
+    else:
+        cohort_text = f"Cohort {overall_cohort}" if overall_cohort else "Entry Level"
+        summary = f"You're currently in {cohort_text}. Reach Cohort {top} to become Placement Ready."
+    return {
+        "score": overall_score if overall_score is not None else 0,
+        "ready": ready,
+        "statusLabel": "Ready" if ready else "Not Ready",
+        "summary": summary,
+    }
+
+
+def compute_overall_performance(db, student_id):
+    """Overall Score, Overall Cohort, average Interview Score,
+    Assessments Completed count, and Placement Readiness — all
+    recomputed live from db.quiz_attempts on every call, so they are
+    always in sync with the latest interview-mark entry or validation.
+    The result is also written onto the student's user doc as a
+    snapshot (overallPerformanceSnapshot) purely so other modules —
+    reports, analytics, future recommendation engines — can read a
+    stored value without recomputing; that stored copy is never the
+    source of truth, this function always is.
+    """
+    student = db.users.find_one({"_id": student_id})
+    if not student:
+        return None
+
+    # v0.0.7 fix: this MUST use the exact same "completed" definition as
+    # recompute_cohort_from_quiz_results() (Validated only) — that function
+    # is what actually writes db.users.cohort, the field the dashboard
+    # header / quiz-eligibility checks read. Previously this also counted
+    # RESULT_STATUS_INTERVIEW_DONE ("Interview Completed"), so a result
+    # with trainer-entered-but-not-yet-validated marks could push the
+    # Overall Score/Overall Cohort shown here into e.g. "Cohort B" while
+    # db.users.cohort correctly stayed "Entry Level" pending validation —
+    # two different cohort values on the same dashboard for the same
+    # student (header vs snapshot), from two different "completed" rules.
+    # Restricting both to Validated-only makes them structurally unable
+    # to diverge again, rather than just happening to agree today.
+    completed = list(db.quiz_attempts.find({
+        "studentId": student_id,
+        "status": "submitted",
+        "resultStatus": RESULT_STATUS_VALIDATED,
+        "finalAverage": {"$ne": None},
+    }))
+
+    scores = [c["finalAverage"] for c in completed if c.get("finalAverage") is not None]
+    overall_score = round(sum(scores) / len(scores), 2) if scores else None
+    overall_cohort = cohort_from_score(db, overall_score) if overall_score is not None else None
+
+    interview_scores = [c["interviewMarks"] for c in completed if c.get("interviewMarks") is not None]
+    average_interview_score = round(sum(interview_scores) / len(interview_scores), 2) if interview_scores else None
+
+    readiness = compute_placement_readiness(db, overall_score, overall_cohort)
+
+    result = {
+        "overallScore": overall_score,
+        "overallCohort": overall_cohort,
+        "overallCohortLabel": (f"Cohort {overall_cohort}" if overall_cohort else "Entry Level"),
+        "averageInterviewScore": average_interview_score,
+        "assessmentsCompleted": len(completed),
+        "placementReadiness": readiness,
+    }
+
+    db.users.update_one(
+        {"_id": student_id},
+        {"$set": {"overallPerformanceSnapshot": dict(result, computedAt=now())}},
+    )
+    return result
 
 
 def serialize_quiz_result(db, attempt, quiz=None):
@@ -314,7 +586,7 @@ def serialize_quiz_result(db, attempt, quiz=None):
     }
 
 
-def compute_quiz_analytics(db, college=None, cohort="all", quiz_id="all"):
+def compute_quiz_analytics(db, college=None, cohort="all", quiz_id="all", department="all", search=""):
     """Dynamic analytics for the Quiz Responses page — Student
     Participation, Performance Metrics, Leaderboard (top 10) and
     Section-wise Performance — computed live from db.quiz_attempts (and,
@@ -323,10 +595,11 @@ def compute_quiz_analytics(db, college=None, cohort="all", quiz_id="all"):
     reflects the latest submissions.
 
     college=None means unscoped (Super Admin, sees every college); pass
-    a college name to scope everything to it (Trainer). cohort/quiz_id
-    of "all" mean unfiltered on that dimension — same semantics either
-    caller uses, so Super Admin and Trainer can never compute this
-    differently from each other.
+    a college name to scope everything to it (Trainer). cohort/quiz_id/
+    department of "all" mean unfiltered on that dimension — same
+    semantics either caller uses, so Super Admin and Trainer can never
+    compute this differently from each other. `search` matches Student
+    Name or Roll Number, same as list_quiz_responses()/list_quiz_results().
     """
     query = {"status": "submitted"}
     if college:
@@ -337,11 +610,18 @@ def compute_quiz_analytics(db, college=None, cohort="all", quiz_id="all"):
         oid = to_object_id(quiz_id)
         if oid is not None:
             query["quizId"] = oid
+    if department and department != "all":
+        query["department"] = department
+    search_clause = _student_search_query(search)
+    if search_clause:
+        query.update(search_clause)
 
     submitted = list(db.quiz_attempts.find(query))
 
     # Students Attempted / Yet To Attempt — scoped to the same
-    # college/cohort filters, over every registered student.
+    # college/cohort filters, over every registered student. (Course and
+    # search are per-attempt refinements, not part of the "who's yet to
+    # attempt" denominator, which is about the whole eligible population.)
     student_query = {"role": "student"}
     if college:
         student_query["college"] = college
@@ -350,6 +630,8 @@ def compute_quiz_analytics(db, college=None, cohort="all", quiz_id="all"):
             student_query["$or"] = [{"cohort": None}, {"cohort": {"$exists": False}}]
         else:
             student_query["cohort"] = cohort
+    if department and department != "all":
+        student_query["department"] = department
     total_students = db.users.count_documents(student_query)
     attempted_ids = {str(a["studentId"]) for a in submitted if a.get("studentId")}
     students_attempted = len(attempted_ids)
@@ -415,12 +697,14 @@ def compute_quiz_analytics(db, college=None, cohort="all", quiz_id="all"):
     }
 
 
-def list_quiz_responses(db, college=None, cohort="all", quiz_id="all", limit=200):
+def list_quiz_responses(db, college=None, cohort="all", quiz_id="all", department="all", search="", limit=200):
     """Raw per-attempt rows for the Quiz Responses table — the same
     db.quiz_attempts query compute_quiz_analytics() aggregates, just
     returned as individual rows instead of summarized. Shared so the
     table and the analytics above can never disagree about which
-    attempts are in scope.
+    attempts are in scope. `department` filters on Course/Department,
+    `search` matches Student Name or Roll Number — both resolved here,
+    in the database query itself, never in the browser.
     """
     query = {"status": "submitted"}
     if college:
@@ -431,6 +715,11 @@ def list_quiz_responses(db, college=None, cohort="all", quiz_id="all", limit=200
         oid = to_object_id(quiz_id)
         if oid is not None:
             query["quizId"] = oid
+    if department and department != "all":
+        query["department"] = department
+    search_clause = _student_search_query(search)
+    if search_clause:
+        query.update(search_clause)
 
     cursor = db.quiz_attempts.find(query).sort("submittedAt", -1).limit(int(limit))
     rows = []
@@ -438,6 +727,7 @@ def list_quiz_responses(db, college=None, cohort="all", quiz_id="all", limit=200
         rows.append({
             "attemptId": str(a["_id"]),
             "studentName": a.get("studentName"),
+            "rollNumber": a.get("studentRollNumber"),
             "college": a.get("college"),
             "department": a.get("department"),
             "cohort": a.get("cohort") or ENTRY_LEVEL,
@@ -450,11 +740,119 @@ def list_quiz_responses(db, college=None, cohort="all", quiz_id="all", limit=200
     return rows
 
 
-def list_quiz_results(db, college=None, student_id=None, statuses=None, limit=500):
+def _student_search_query(search):
+    """Builds a Mongo `$or` clause matching `search` against Student Name
+    OR Roll Number, case-insensitive, partial match — used by every quiz
+    Responses/Results search box across both dashboards so they can never
+    disagree about what "search" means.
+
+    NOTE on "Register Number": this platform has exactly one student
+    identifier field (`rollNumber` on `db.users`, copied onto attempts as
+    `studentRollNumber`/`rollNumber`) — there is no separate Register
+    Number field anywhere in the schema. Searching Roll Number already
+    covers "Register Number (if available)" from the spec; if a distinct
+    Register Number field is added to the platform later, add it to the
+    `$or` below and nowhere else needs to change.
+    """
+    search = (search or "").strip()
+    if not search:
+        return None
+    pattern = re.escape(search)
+    return {"$or": [
+        {"studentName": {"$regex": pattern, "$options": "i"}},
+        {"studentRollNumber": {"$regex": pattern, "$options": "i"}},
+        {"rollNumber": {"$regex": pattern, "$options": "i"}},
+    ]}
+
+
+def _verification_search_query(search):
+    """Same idea as _student_search_query, but also matches Assessment
+    Name / College / Department — used by Manual (Interview) Verification
+    and Validator Verification's search boxes, which the spec explicitly
+    asks to search across all five of those fields at once. quizTitle,
+    college and department are all stored directly on the quiz_attempts
+    document itself (see student.py's start_quiz / _finalize_attempt), so
+    this is still a single flat query, no join required.
+    """
+    search = (search or "").strip()
+    if not search:
+        return None
+    pattern = re.escape(search)
+    return {"$or": [
+        {"studentName": {"$regex": pattern, "$options": "i"}},
+        {"studentRollNumber": {"$regex": pattern, "$options": "i"}},
+        {"quizTitle": {"$regex": pattern, "$options": "i"}},
+        {"college": {"$regex": pattern, "$options": "i"}},
+        {"department": {"$regex": pattern, "$options": "i"}},
+    ]}
+
+
+def list_distinct_departments(db, college=None):
+    """Distinct, non-empty Course/Department names actually in use by
+    students — never hardcoded, always read live from db.users. Backs the
+    "Course" filter dropdown on both dashboards' Quiz Responses pages
+    (GET .../quiz-responses/filters)."""
+    query = {"role": "student", "department": {"$nin": [None, ""]}}
+    if college:
+        query["college"] = college
+    return sorted(d for d in db.users.distinct("department", query) if d)
+
+
+def build_quiz_responses_workbook(rows):
+    """Part: Export — builds an in-memory .xlsx (openpyxl, same library
+    already used everywhere else in this codebase for Excel I/O) from
+    exactly the rows a Quiz Responses table is currently showing —
+    whatever `list_quiz_responses()` returned for the caller's current
+    filters/search. Never re-queries or re-filters; the export is always
+    the same backend-generated data the page is already displaying.
+    Returns a BytesIO positioned at 0, ready for flask.send_file.
+    """
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Quiz Responses"
+    headers = [
+        "Student Name", "Roll Number", "College", "Course/Department",
+        "Cohort", "Assessment", "Score (%)", "Status", "Submitted At",
+    ]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    for r in rows:
+        ws.append([
+            r.get("studentName") or "",
+            r.get("rollNumber") or "",
+            r.get("college") or "",
+            r.get("department") or "",
+            r.get("cohort") or "",
+            r.get("assessmentName") or "",
+            r.get("overallPercentage") if r.get("overallPercentage") is not None else "",
+            r.get("status") or "",
+            r.get("submittedAt") or "",
+        ])
+    for col, width in zip("ABCDEFGHI", (22, 16, 22, 20, 12, 26, 12, 12, 22)):
+        ws.column_dimensions[col].width = width
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def list_quiz_results(db, college=None, student_id=None, statuses=None, search="", broad_search=False, limit=500):
     """Submitted Create-Quiz attempts, newest first, optionally scoped to
     one college (Trainer) or left unscoped (Super Admin sees everyone).
     Never returns an attempt that hasn't actually been submitted — a
-    student who never finished a quiz never appears anywhere here."""
+    student who never finished a quiz never appears anywhere here.
+    `search` matches Student Name / Roll Number (see
+    _student_search_query) by default; pass broad_search=True to also
+    match Assessment Name / College / Department (see
+    _verification_search_query) — used by Manual (Interview) Verification
+    and Validator Verification, which search across all five fields.
+    """
     query = {"status": "submitted"}
     if college:
         query["college"] = college
@@ -462,6 +860,9 @@ def list_quiz_results(db, college=None, student_id=None, statuses=None, limit=50
         query["studentId"] = student_id
     if statuses:
         query["resultStatus"] = {"$in": list(statuses)}
+    search_clause = _verification_search_query(search) if broad_search else _student_search_query(search)
+    if search_clause:
+        query.update(search_clause)
     cursor = db.quiz_attempts.find(query).sort("submittedAt", -1).limit(int(limit))
     quizzes_cache = {}
     rows = []
@@ -536,6 +937,12 @@ def validate_quiz_result(db, attempt_id, validated_by, college=None):
             "validatedAt": now(),
         }},
     )
+    # Root-cause fix (see recompute_cohort_from_quiz_results docstring):
+    # validating a result is the point this workflow considers a cohort
+    # assignment "final" — propagate it to the student's actual account
+    # cohort (db.users.cohort), the field every quiz-eligibility check
+    # reads, instead of leaving it stranded on this one attempt document.
+    recompute_cohort_from_quiz_results(db, attempt["studentId"])
     return db.quiz_attempts.find_one({"_id": attempt_id}), None
 
 

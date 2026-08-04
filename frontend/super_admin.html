@@ -382,6 +382,7 @@ table.data-table{ width:100%; border-collapse:collapse; font-size:13.5px; min-wi
 .toast.danger .icon{ color:var(--rose); }
 
 .empty-state{ text-align:center; padding:50px 20px; color:var(--text-faint); }
+.empty-state .e-ic{ font-size:36px; margin-bottom:12px; }
 .empty-state .icon-lg{ width:38px; height:38px; margin:0 auto 12px; color:var(--text-faint); }
 
 /* audit log timeline dot */
@@ -1119,21 +1120,52 @@ function mapQuizFromApi(q){
     _raw: q,
   };
 }
+// Table rows AND analytics/leaderboard both come straight from the
+// database, fully filtered server-side — College, Course (Department),
+// Cohort (incl. Entry Level), Assessment and free-text search (Student
+// Name / Roll Number / Register Number) are all resolved in the
+// GET /admin/quiz-responses query itself; nothing is ever filtered here
+// in the browser. See quiz_common.list_quiz_responses/compute_quiz_analytics.
+function respFilterQueryString(){
+  const f = STATE.respFilters;
+  return new URLSearchParams({
+    college: f.college || 'all',
+    cohort: f.cohort || 'all',
+    quizId: f.quiz || 'all',
+    department: f.department || 'all',
+    search: f.search || '',
+  }).toString();
+}
 async function loadQuizResponses(){
-  const res = await platformApiGet('/assessments/responses');
+  const res = await platformApiGet('/admin/quiz-responses?' + respFilterQueryString());
   const arr = res.ok ? pickArray(res.data, 'responses') : null;
   if(arr) QUIZ_RESPONSES = arr;
+  else if(typeof showToast==='function') showToast(res.data.message || 'Could not load quiz responses.', true);
+}
+// Course/Department dropdown options — distinct values actually in use,
+// read live from the database (see quiz_common.list_distinct_departments),
+// scoped to the currently-selected College filter (or every college, if
+// "All Colleges" is selected). Re-fetched whenever the College filter
+// changes so the Course list never shows departments from a college that
+// isn't even in scope anymore.
+let QUIZ_RESPONSES_DEPARTMENTS = [];
+async function loadQuizResponsesFilterOptions(){
+  const f = STATE.respFilters;
+  const qs = new URLSearchParams({ college: f.college || 'all' });
+  const res = await platformApiGet('/admin/quiz-responses/filters?' + qs.toString());
+  QUIZ_RESPONSES_DEPARTMENTS = (res.ok && res.data.departments) || [];
+}
+function exportQuizResponses(){
+  window.open('/api/admin/quiz-responses/export?' + respFilterQueryString(), '_blank');
 }
 // Quiz Responses analytics — Student Participation, Performance Metrics,
 // Leaderboard and Section-wise Performance, all computed live on the
 // backend from actual quiz submissions and re-fetched whenever the
-// college/cohort/quiz filters change (see 'resp-filter' below) and on a
-// light poll while the tab is open, so it never shows stale/hardcoded
-// numbers.
+// college/course/cohort/quiz/search filters change (see 'resp-filter'
+// below) and on a light poll while the tab is open, so it never shows
+// stale/hardcoded numbers.
 async function loadQuizAnalytics(){
-  const f = STATE.respFilters;
-  const qs = new URLSearchParams({ college: f.college||'all', cohort: f.cohort||'all', quizId: f.quiz||'all' });
-  const res = await platformApiGet('/admin/quiz-analytics?'+qs.toString());
+  const res = await platformApiGet('/admin/quiz-analytics?'+respFilterQueryString());
   if(res.ok && res.data) QUIZ_ANALYTICS = Object.assign({}, QUIZ_ANALYTICS, res.data);
   if(STATE.page==='assessments' && STATE.tab.assessments==='responses') renderPage();
 }
@@ -1146,17 +1178,20 @@ let QUIZ_RESULTS = [];
 let QUIZ_INTERVIEW_VERIFICATION = [];
 let QUIZ_VALIDATION_VERIFICATION = [];
 async function loadQuizResultsAdmin(){
-  const res = await platformApiGet('/admin/quiz-results');
+  const qs = new URLSearchParams({ search: STATE.filters.quizResultsSearch || '' });
+  const res = await platformApiGet('/admin/quiz-results?' + qs.toString());
   const arr = res.ok ? pickArray(res.data, 'results') : null;
   if(arr) QUIZ_RESULTS = arr;
 }
 async function loadQuizInterviewVerificationAdmin(){
-  const res = await platformApiGet('/admin/quiz-interview-verification');
+  const qs = new URLSearchParams({ search: STATE.filters.interviewVerificationSearch || '' });
+  const res = await platformApiGet('/admin/quiz-interview-verification?' + qs.toString());
   const arr = res.ok ? pickArray(res.data, 'results') : null;
   if(arr) QUIZ_INTERVIEW_VERIFICATION = arr;
 }
 async function loadQuizValidationVerificationAdmin(){
-  const res = await platformApiGet('/admin/quiz-validation-verification');
+  const qs = new URLSearchParams({ search: STATE.filters.validationVerificationSearch || '' });
+  const res = await platformApiGet('/admin/quiz-validation-verification?' + qs.toString());
   const arr = res.ok ? pickArray(res.data, 'results') : null;
   if(arr) QUIZ_VALIDATION_VERIFICATION = arr;
 }
@@ -1264,7 +1299,7 @@ async function loadPlatformData(){
   await Promise.all([
     loadColleges(), loadDepartments(), loadTrainers(), loadStudents(),
     loadQuestionBanks(), loadAssessmentTemplates(), loadInterventionsSummary(),
-    loadQuizzes(), loadQuizResponses(), loadQuizAnalytics(),
+    loadQuizzes(), loadQuizResponses(), loadQuizAnalytics(), loadQuizResponsesFilterOptions(),
     loadQuizResultsAdmin(), loadQuizInterviewVerificationAdmin(), loadQuizValidationVerificationAdmin(),
     loadWorkshopSessions(), loadAttendanceRecords(), loadAuditLogs(),
     loadPlacementTrend(), loadDeptDistribution(), loadRecentActivity(),
@@ -1788,7 +1823,7 @@ function timeAgo(iso){
 /* ============================================================
    STATE + NAV CONFIG
 ============================================================ */
-const STATE = { page:'dashboard', params:{}, sidebarCollapsed:false, mobileOpen:false, tab:{ users:'Student', assessments:'quizzes', interventions:'sessions', attendance:'mark', trainers:'pending' }, filters:{}, respFilters:{ college:'all', cohort:'all', trainer:'all', quiz:'all', status:'all' } };
+const STATE = { page:'dashboard', params:{}, sidebarCollapsed:false, mobileOpen:false, tab:{ users:'Student', assessments:'quizzes', interventions:'sessions', attendance:'mark', trainers:'pending' }, filters:{}, respFilters:{ college:'all', cohort:'all', quiz:'all', department:'all', search:'' } };
 
 // Initial value is 0 — real counts are loaded async from GET /api/auth/stats
 // and patched into the sidebar DOM by updateSidebarCounts() once they arrive.
@@ -2981,25 +3016,26 @@ function pageAssessmentsQuizzes(){
 
 function pageAssessmentsResponses(){
   const f = STATE.respFilters;
-  const list = QUIZ_RESPONSES.filter(r=>
-    (f.college==='all'||r.college===f.college) &&
-    (f.trainer==='all'||r.trainer===f.trainer) &&
-    (f.quiz==='all'||r.quiz===f.quiz) &&
-    (f.status==='all'||r.status===f.status)
-  );
+  // Table rows come straight from GET /admin/quiz-responses, already
+  // filtered by College/Course/Cohort/Assessment/Search on the backend —
+  // QUIZ_RESPONSES only ever holds rows that already match every active
+  // filter, so no further filtering happens here.
+  const list = QUIZ_RESPONSES;
   // Student Participation + Performance Metrics + Leaderboard +
   // Section-wise Performance below all come from QUIZ_ANALYTICS, loaded
   // live from GET /api/admin/quiz-analytics (see loadQuizAnalytics()) —
   // computed from actual quiz submissions, never hardcoded, and kept in
-  // sync with the College/Cohort/Assessment filters right below.
+  // sync with the same filters below.
   const qa = QUIZ_ANALYTICS;
   return `
   <div class="toolbar">
+    <div class="search-box"><span>${ic('search','icon icon-sm')}</span><input type="text" id="respSearch" placeholder="Search by name, roll no. or register no…" value="${esc(f.search||'')}"></div>
     <select id="respCollege" data-action="resp-filter" data-key="college"><option value="all">All Colleges</option>${activeCollegeOptions(f.college)}</select>
+    <select id="respCourse" data-action="resp-filter" data-key="department"><option value="all">All Courses</option>${QUIZ_RESPONSES_DEPARTMENTS.map(d=>`<option value="${esc(d)}" ${f.department===d?'selected':''}>${esc(d)}</option>`).join('')}</select>
     <select id="respCohort" data-action="resp-filter" data-key="cohort"><option value="all">All Cohorts</option>${['A','B','C','Entry Level'].map(c=>`<option value="${esc(c)}" ${f.cohort===c?'selected':''}>${c==='Entry Level'?'Entry Level':'Cohort '+c}</option>`).join('')}</select>
-    <select id="respTrainer" data-action="resp-filter" data-key="trainer"><option value="all">All Trainers</option>${TRAINERS.map(t=>`<option value="${esc(t.name)}" ${f.trainer===t.name?'selected':''}>${t.name}</option>`).join('')}</select>
     <select id="respQuiz" data-action="resp-filter" data-key="quiz"><option value="all">All Assessments</option>${QUIZZES.map(q=>`<option value="${q.id}" ${f.quiz===q.id?'selected':''}>${q.name}</option>`).join('')}</select>
-    <select id="respStatus" data-action="resp-filter" data-key="status"><option value="all">All Status</option><option value="Completed" ${f.status==='Completed'?'selected':''}>Completed</option><option value="Pending" ${f.status==='Pending'?'selected':''}>Pending</option></select>
+    <button class="btn btn-ghost btn-sm" data-action="clear-resp-filters">✕ Clear</button>
+    <button class="btn btn-primary btn-sm" onclick="exportQuizResponses()">⇩ Export</button>
   </div>
   <div class="card stat-band" style="margin-bottom:18px;">
     <div class="stat-band-item"><span class="sb-label">Students Attempted</span><div class="sb-value">${qa.studentsAttempted}</div></div>
@@ -3032,11 +3068,11 @@ function pageAssessmentsResponses(){
     </div>
   </div>
   <div class="panel"><div class="panel-body pad-0"><div class="table-wrap"><table class="data-table">
-    <thead><tr><th>Student</th><th>Assessment</th><th>College</th><th>Trainer</th><th>Score</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Student</th><th>Assessment</th><th>College</th><th>Course</th><th>Score</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
     <tbody>${list.length?list.map((r,i)=>`
-      <tr><td class="row-title">${r.student}</td><td>${(QUIZZES.find(q=>q.id===r.quiz)||{}).name||r.quiz}</td><td>${r.college}</td><td>${r.trainer}</td>
-        <td class="mono">${r.status==='Completed'?r.score:'—'}</td><td>${statusChip(r.status==='Completed'?'active':'pending')}</td><td class="mono">${r.date}</td>
-        <td class="td-actions"><button class="btn btn-ghost btn-xs" data-action="view-response" data-idx="${QUIZ_RESPONSES.indexOf(r)}">${ic('eye','icon icon-sm')}Details</button></td>
+      <tr><td class="row-title">${esc(r.studentName||'—')}</td><td>${esc(r.assessmentName||'—')}</td><td>${esc(r.college||'—')}</td><td>${esc(r.department||'—')}</td>
+        <td class="mono">${r.overallPercentage!=null?r.overallPercentage+'%':'—'}</td><td>${statusChip('active')}</td><td class="mono">${r.submittedAt?new Date(r.submittedAt).toLocaleDateString():'—'}</td>
+        <td class="td-actions"><button class="btn btn-ghost btn-xs" data-action="view-response" data-idx="${i}">${ic('eye','icon icon-sm')}Details</button></td>
       </tr>`).join(''):`<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:24px;">No responses match these filters.</td></tr>`}</tbody>
   </table></div></div></div>`;
 }
@@ -3050,6 +3086,9 @@ function pageAssessmentsQuizResults(){
   const list = QUIZ_RESULTS;
   return `
   <p class="desc" style="margin-bottom:14px;">Every student across every college who has actually submitted a quiz created in Quiz Management. No one appears here until they submit.</p>
+  <div class="toolbar">
+    <div class="search-box"><span>${ic('search','icon icon-sm')}</span><input type="text" id="quizResultsSearch" placeholder="Search by name, roll no. or register no…" value="${esc(STATE.filters.quizResultsSearch||'')}"></div>
+  </div>
   <div class="panel"><div class="panel-body pad-0"><div class="table-wrap"><table class="data-table">
     <thead><tr><th>Student</th><th>Roll No.</th><th>Department</th><th>College</th><th>Quiz</th><th>Quiz %</th><th>Submitted</th></tr></thead>
     <tbody>${list.length?list.map(r=>`
@@ -3058,7 +3097,7 @@ function pageAssessmentsQuizResults(){
         <td>${esc(r.department||'—')}</td><td>${esc(r.college||'—')}</td><td>${esc(r.quizTitle||'—')}</td>
         <td class="mono">${r.percentageMarks!=null?r.percentageMarks+'%':'—'}</td>
         <td class="mono">${r.submittedAt?new Date(r.submittedAt).toLocaleString():'—'}</td>
-      </tr>`).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:24px;">No students have submitted a quiz yet.</td></tr>`}</tbody>
+      </tr>`).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:24px;">No students match these filters.</td></tr>`}</tbody>
   </table></div></div></div>`;
 }
 
@@ -3066,6 +3105,9 @@ function pageAssessmentsInterviewVerification(){
   const list = QUIZ_INTERVIEW_VERIFICATION;
   return `
   <p class="desc" style="margin-bottom:14px;">Enter interview marks (out of 100) for any student who has submitted a quiz, platform-wide. Final Average = (Quiz % + Interview Marks) / 2, and a cohort is assigned automatically from the current Placement Rules.</p>
+  <div class="toolbar">
+    <div class="search-box"><span>${ic('search','icon icon-sm')}</span><input type="text" id="interviewVerificationSearch" placeholder="Search by assessment, student, roll no., college or department…" value="${esc(STATE.filters.interviewVerificationSearch||'')}"></div>
+  </div>
   <div class="panel"><div class="panel-body pad-0"><div class="table-wrap"><table class="data-table">
     <thead><tr><th>Student</th><th>Roll No.</th><th>College</th><th>Quiz</th><th>Quiz %</th><th>Interview Marks</th><th>Status</th><th>Actions</th></tr></thead>
     <tbody>${list.length?list.map((r,i)=>`
@@ -3076,7 +3118,7 @@ function pageAssessmentsInterviewVerification(){
         <td class="mono">${r.interviewMarks!=null?r.interviewMarks+'%':'—'}</td>
         <td>${quizResultStatusChip(r.status)}</td>
         <td class="td-actions"><button class="btn btn-ghost btn-xs" data-action="enter-quiz-interview-marks" data-idx="${i}">${ic('edit','icon icon-sm')}${r.interviewMarks!=null?'Update':'Enter'} Marks</button></td>
-      </tr>`).join(''):`<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:24px;">No students are awaiting interview verification yet.</td></tr>`}</tbody>
+      </tr>`).join(''):`<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:24px;">No students match these filters.</td></tr>`}</tbody>
   </table></div></div></div>`;
 }
 
@@ -3084,6 +3126,9 @@ function pageAssessmentsValidationVerification(){
   const list = QUIZ_VALIDATION_VERIFICATION;
   return `
   <p class="desc" style="margin-bottom:14px;">Results with interview marks entered. Final Average and Assigned Cohort are computed automatically from the current Placement Rules; validate once confirmed.</p>
+  <div class="toolbar">
+    <div class="search-box"><span>${ic('search','icon icon-sm')}</span><input type="text" id="validationVerificationSearch" placeholder="Search by assessment, student, roll no., college or department…" value="${esc(STATE.filters.validationVerificationSearch||'')}"></div>
+  </div>
   <div class="panel"><div class="panel-body pad-0"><div class="table-wrap"><table class="data-table">
     <thead><tr><th>Student</th><th>Roll No.</th><th>Quiz Marks</th><th>Interview Marks</th><th>Final Average</th><th>Cohort</th><th>Status</th><th>Actions</th></tr></thead>
     <tbody>${list.length?list.map((r,i)=>`
@@ -3095,7 +3140,7 @@ function pageAssessmentsValidationVerification(){
         <td>${r.cohort?`<span class="chip chip-neutral">${esc(r.cohort)}</span>`:'—'}</td>
         <td>${quizResultStatusChip(r.status)}</td>
         <td class="td-actions">${r.status==='Validated'?'<span style="color:var(--text-faint);font-size:12.5px;">Validated</span>':`<button class="btn btn-accent btn-xs" data-action="validate-quiz-result" data-idx="${i}">Validate</button>`}</td>
-      </tr>`).join(''):`<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:24px;">No results ready for validation yet — enter interview marks first.</td></tr>`}</tbody>
+      </tr>`).join(''):`<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:24px;">No results match these filters.</td></tr>`}</tbody>
   </table></div></div></div>`;
 }
 function pagePlacementRules(){
@@ -3120,6 +3165,13 @@ function pagePlacementRules(){
       <div class="panel-body">${donutSVG(STUDENT_DIST.slice(0,3))}
         <div class="legend" style="margin-top:16px;">${STUDENT_DIST.slice(0,3).map(s=>`<div class="legend-row"><span class="legend-dot" style="background:${s.color}"></span><span class="lg-label">${s.label}</span><span class="lg-val">${s.value.toLocaleString()}</span></div>`).join('')}</div>
       </div>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:18px;">
+    <div class="panel-bar"><span class="panel-dot pd-1"></span><span class="panel-dot pd-2"></span><span class="panel-dot pd-3"></span><span class="panel-title">cohort-data-sync.job</span></div>
+    <div class="panel-body">
+      <p class="desc" style="margin-bottom:12px;">Cohort-mapping bug fix: run this once to retroactively correct any student whose Create-Quiz result was Validated <em>before</em> this fix existed — their assigned cohort never propagated to their account, so quizzes targeted at their cohort stayed invisible to them even though their own Quiz History always showed it correctly. Safe to re-run any time; already-correct students are left untouched.</p>
+      <button class="btn btn-ghost btn-sm" data-action="run-cohort-backfill">${ic('history','icon icon-sm')} Sync Student Cohorts</button>
     </div>
   </div>`;
 }
@@ -3659,7 +3711,12 @@ document.addEventListener('click', function(e){
     break; }
 
     /* assessment management — quiz responses */
-    case 'view-response': { const r=QUIZ_RESPONSES[idx]; const qz=QUIZZES.find(x=>x.id===r.quiz); openConfirm({icon:'fileText', title:`${r.student} — ${qz?qz.name:r.quiz}`, message:`College: ${r.college} · Trainer: ${r.trainer} · Status: ${r.status} · Score: ${r.status==='Completed'?r.score:'Not yet attempted'} · Date: ${r.date}.`, confirmLabel:'Close', onConfirm:()=>{}}); break; }
+    case 'view-response': { const r=QUIZ_RESPONSES[idx]; openConfirm({icon:'fileText', title:`${r.studentName||'—'} — ${r.assessmentName||'—'}`, message:`College: ${r.college||'—'} · Course: ${r.department||'—'} · Cohort: ${r.cohort||'—'} · Score: ${r.overallPercentage!=null?r.overallPercentage+'%':'—'} · Submitted: ${r.submittedAt?new Date(r.submittedAt).toLocaleString():'—'}.`, confirmLabel:'Close', onConfirm:()=>{}}); break; }
+    case 'clear-resp-filters': {
+      STATE.respFilters = { college:'all', cohort:'all', quiz:'all', department:'all', search:'' };
+      (async () => { await loadQuizResponsesFilterOptions(); await Promise.all([loadQuizResponses(), loadQuizAnalytics()]); renderPage(); })();
+      break;
+    }
 
     /* assessment management — interview / validation verification */
     case 'enter-quiz-interview-marks': openQuizInterviewMarksModal(idx); break;
@@ -3668,6 +3725,15 @@ document.addEventListener('click', function(e){
 
     /* placement rules / interventions / settings / profile */
     case 'save-rules': showToast('Placement readiness rules saved'); break;
+    case 'run-cohort-backfill': {
+      t.disabled = true; const originalLabel = t.innerHTML; t.innerHTML = 'Syncing…';
+      (async () => {
+        const res = await platformApiPost('/admin/student-cohort/backfill', {});
+        t.disabled = false; t.innerHTML = originalLabel;
+        showToast(res.ok ? res.data.message : (res.data.message || 'Could not run the cohort sync.'));
+      })();
+      break;
+    }
     case 'add-intervention': openConfirm({icon:'puzzle', title:'New intervention', message:'This opens the intervention creation form.', confirmLabel:'Got it', onConfirm:()=>{}}); break;
     case 'edit-intervention': openConfirm({icon:'edit', title:`Edit ${INTERVENTIONS[idx].name}`, message:'This opens the intervention edit form.', confirmLabel:'Got it', onConfirm:()=>{}}); break;
     case 'delete-intervention': openConfirm({icon:'trash', danger:true, title:'Delete this intervention?', message:'This cannot be undone.', confirmLabel:'Delete', onConfirm:()=>{ INTERVENTIONS.splice(idx,1); showToast('Intervention deleted', true); renderPage(); }}); break;
@@ -3703,6 +3769,54 @@ document.addEventListener('input', function(e){
   if(t.id==='quizSearch'){ applyMultiFilter('#quizTable','tbody tr','quizSearch',{quizCollegeFilter:'college',quizTrainerFilter:'trainer',quizStatusFilter:'status'}); }
   if(t.id==='sessionSearch'){ applyMultiFilter('#sessionGrid','.entity-card','sessionSearch',{sessionCollegeFilter:'college',sessionStatusFilter:'status'}); }
   if(t.id==='interviewSearch'){ applyRowFilter('#interviewTable','tbody tr', t.value); }
+  if(t.id==='respSearch'){
+    STATE.respFilters.search = t.value;
+    clearTimeout(window._respSearchDebounce);
+    window._respSearchDebounce = setTimeout(async () => {
+      await Promise.all([loadQuizResponses(), loadQuizAnalytics()]);
+      const caret = t.selectionStart;
+      renderPage();
+      // Re-render regenerates the whole panel's markup (same pattern as
+      // every other page here) — restore focus/cursor so a debounced
+      // backend round-trip while the admin is still typing doesn't kick
+      // them out of the search box.
+      const el = document.getElementById('respSearch');
+      if(el){ el.focus(); el.setSelectionRange(caret, caret); }
+    }, 350);
+  }
+  if(t.id==='quizResultsSearch'){
+    STATE.filters.quizResultsSearch = t.value;
+    clearTimeout(window._quizResultsSearchDebounce);
+    window._quizResultsSearchDebounce = setTimeout(async () => {
+      await loadQuizResultsAdmin();
+      const caret = t.selectionStart;
+      renderPage();
+      const el = document.getElementById('quizResultsSearch');
+      if(el){ el.focus(); el.setSelectionRange(caret, caret); }
+    }, 350);
+  }
+  if(t.id==='interviewVerificationSearch'){
+    STATE.filters.interviewVerificationSearch = t.value;
+    clearTimeout(window._interviewVerificationSearchDebounce);
+    window._interviewVerificationSearchDebounce = setTimeout(async () => {
+      await loadQuizInterviewVerificationAdmin();
+      const caret = t.selectionStart;
+      renderPage();
+      const el = document.getElementById('interviewVerificationSearch');
+      if(el){ el.focus(); el.setSelectionRange(caret, caret); }
+    }, 300);
+  }
+  if(t.id==='validationVerificationSearch'){
+    STATE.filters.validationVerificationSearch = t.value;
+    clearTimeout(window._validationVerificationSearchDebounce);
+    window._validationVerificationSearchDebounce = setTimeout(async () => {
+      await loadQuizValidationVerificationAdmin();
+      const caret = t.selectionStart;
+      renderPage();
+      const el = document.getElementById('validationVerificationSearch');
+      if(el){ el.focus(); el.setSelectionRange(caret, caret); }
+    }, 300);
+  }
 });
 document.addEventListener('change', function(e){
   const t = e.target;
@@ -3715,8 +3829,17 @@ document.addEventListener('change', function(e){
   if(t.id==='attMarkCollege'){ STATE.filters.attCollege = t.value; ATT_MARK_STATE = {college:t.value, marks:{}}; renderPage(); }
   if(t.dataset && t.dataset.action==='resp-filter'){
     STATE.respFilters[t.dataset.key] = t.value;
-    renderPage();
-    if(['college','cohort','quiz'].includes(t.dataset.key)) loadQuizAnalytics();
+    (async () => {
+      // Course options depend on which College is in scope — refresh
+      // them first so the Course dropdown never lists a department from
+      // a college that just got filtered out.
+      if(t.dataset.key === 'college'){
+        STATE.respFilters.department = 'all';
+        await loadQuizResponsesFilterOptions();
+      }
+      await Promise.all([loadQuizResponses(), loadQuizAnalytics()]);
+      renderPage();
+    })();
   }
 });
 
@@ -3951,9 +4074,10 @@ setInterval(async () => {
 // whenever new submissions are received" per spec — poll while that tab
 // is on screen; loadQuizAnalytics() itself re-renders once fresh data
 // arrives, same pattern as the Quizzes poll above.
-setInterval(() => {
+setInterval(async () => {
   if (STATE.page === 'assessments' && STATE.tab.assessments === 'responses'){
-    loadQuizAnalytics();
+    await Promise.all([loadQuizResponses(), loadQuizAnalytics()]);
+    if (STATE.page === 'assessments' && STATE.tab.assessments === 'responses') renderPage();
   }
 }, 15000);
 function quizWizardMarkup(){
@@ -3981,7 +4105,7 @@ function quizWizardMarkup(){
               <option value="A">Cohort A</option>
               <option value="B">Cohort B</option>
               <option value="C">Cohort C</option>
-              <option value="entry_level">Entry Level (Pre-Cohort Assessment)</option>
+              <option value="entry_level">Entry Level</option>
             </select>
           </div>
           <div class="ms" id="qzCollegesMs">
@@ -4003,12 +4127,7 @@ function quizWizardMarkup(){
           <div class="field"><input type="datetime-local" placeholder=" " id="qzEnd"><label>Quiz End Date & Time</label></div>
         </div>
 
-        <div class="row-3">
-          <div class="field"><input type="number" min="0" placeholder=" " id="qzAvailable" readonly title="Auto-calculated from the questions you add or upload in the next step"><label>Questions Available</label></div>
-          <div class="field"><input type="number" min="1" placeholder=" " id="qzDisplayed" oninput="onDisplayedChange()"><label>Questions Displayed</label></div>
-          <div class="field"><input type="number" min="1" placeholder=" " id="qzDuration"><label>Duration (minutes)</label></div>
-        </div>
-        <p class="field-hint">Questions Available is calculated automatically — the count of manually entered questions, or the number of valid questions detected in your uploaded Excel file. Each student randomly receives "Questions Displayed" of them on their attempt — a different combination every time.</p>
+        <div class="field" style="max-width:220px;"><input type="number" min="1" placeholder=" " id="qzDuration"><label>Duration (minutes)</label></div>
 
         <div class="section-title">Quiz Type</div>
         <div class="radio-cards" id="qzTypeCards">
@@ -4018,86 +4137,20 @@ function quizWizardMarkup(){
           <label class="radio-card" data-qtype="bulk"><input type="radio" name="qzType" value="bulk" onchange="onQuizTypeChange('bulk')">
             <div><div class="rc-title">Bulk Upload</div><div class="rc-sub">Upload an Excel workbook of questions in one go.</div></div>
           </label>
+          <label class="radio-card" data-qtype="question_bank"><input type="radio" name="qzType" value="question_bank" onchange="onQuizTypeChange('question_bank')">
+            <div><div class="rc-title">Question Bank</div><div class="rc-sub">Draw a fresh random set from the platform's shared Question Bank — no authoring or upload needed.</div></div>
+          </label>
         </div>
-
-        <div class="section-title">Difficulty Distribution <span style="font-weight:500;text-transform:none;letter-spacing:0;">(optional)</span></div>
-        <div class="row-3">
-          <div class="field"><input type="number" min="0" placeholder=" " id="qzEasy" oninput="updateDifficultyHint()"><label>Easy</label></div>
-          <div class="field"><input type="number" min="0" placeholder=" " id="qzMedium" oninput="updateDifficultyHint()"><label>Medium</label></div>
-          <div class="field"><input type="number" min="0" placeholder=" " id="qzHard" oninput="updateDifficultyHint()"><label>Hard</label></div>
-        </div>
-        <p class="field-hint" id="qzDifficultyHint">Leave blank to skip a fixed difficulty split. If set, Easy + Medium + Hard must equal Questions to be Displayed.</p>
 
         <p id="qzStep1Error" style="color:var(--rose);font-size:12.5px;display:none;"></p>
       </div>
 
       <!-- ================= STEP 2: QUESTIONS (branches on Quiz Type) ================= -->
       <div class="qz-step" id="qzStep2" style="display:none;">
+       <div id="qzStep2Flex" style="display:flex;flex-direction:column;">
 
-        <!-- ---- SECTION DISTRIBUTION (shown for both Manual and Bulk) ---- -->
-        <div id="qzSectionDistWrap">
-          <div class="section-title">Section Distribution</div>
-          <div id="qzSectionDistLoading" class="empty-state"><div class="e-ic">▦</div>Loading assessment sections…</div>
-          <div id="qzSectionDistRows" style="display:none;"></div>
-          <div class="total-q-banner" id="qzSectionDistTotalWrap" style="display:none;"><span>Allocated</span><span id="qzSectionDistTotal">0 / 0</span></div>
-          <p id="qzSectionDistError" style="color:var(--rose);font-size:12.5px;display:none;margin-top:8px;">Section distribution must equal the number of questions to be displayed.</p>
-          <p id="qzCategoryLimitError" style="color:var(--rose);font-size:12.5px;display:none;margin-top:6px;"></p>
-        </div>
-        <div class="section-divider"></div>
-
-        <!-- ---- MANUAL ENTRY ---- -->
-        <div id="qzManualWrap">
-          <div class="qnav-bar">
-            <div>
-              <div class="qnav-title" id="qManualTitle">Question 1 of 0</div>
-              <div class="qnav-progress" id="qManualProgress">0 of 0 questions complete</div>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;">
-              <span class="q-status-chip incomplete" id="qCurrentStatusChip">Incomplete</span>
-              <button class="btn btn-ghost btn-sm" onclick="removeManualQuestion()" id="qRemoveQBtn">− Remove Question</button>
-              <button class="btn btn-ghost btn-sm" onclick="addManualQuestion()" id="qAddQBtn">+ Add Question</button>
-              <button class="btn btn-ghost btn-sm" onclick="goToQuestion(qzCurrentQIndex-1)" id="qPrevQBtn">← Prev Q</button>
-              <button class="btn btn-ghost btn-sm" onclick="goToQuestion(qzCurrentQIndex+1)" id="qNextQBtn">Next Q →</button>
-            </div>
-          </div>
-          <div class="qnav-pager" id="qManualPager"></div>
-          <p class="field-hint" id="qManualSectionTag" style="margin-top:-8px;"></p>
-
-          <div class="field"><textarea placeholder=" " id="qText" oninput="autosaveCurrentQuestion()"></textarea><label>Question</label></div>
-
-          <div class="row-4">
-            <div class="field qzw-select-field"><label>Type</label>
-              <select id="qType" onchange="onQuestionTypeChange()">
-                <option value="single_choice">Single Choice</option>
-                <option value="multiple_choice">Multiple Choice</option>
-              </select>
-            </div>
-            <div class="field qzw-select-field"><label>Difficulty</label>
-              <select id="qDifficulty" onchange="autosaveCurrentQuestion()">
-                <option value="">Select…</option>
-                <option value="Easy">Easy</option>
-                <option value="Medium">Medium</option>
-                <option value="Hard">Hard</option>
-              </select>
-            </div>
-            <div class="field qzw-select-field"><label>Section</label>
-              <select id="qSection" onchange="autosaveCurrentQuestion()">
-                <option value="">Select…</option>
-              </select>
-            </div>
-            <div class="field"><input type="number" min="0" placeholder=" " id="qMarks" oninput="autosaveCurrentQuestion()"><label>Marks</label></div>
-          </div>
-
-          <div class="answer-grid" id="qOptionsGrid"></div>
-          <p class="field-hint" id="qAnswerHint">Check the box next to each correct option.</p>
-
-          <div class="field"><textarea placeholder=" " id="qExplanation" oninput="autosaveCurrentQuestion()"></textarea><label>Explanation (optional)</label></div>
-
-          <p id="qzManualError" style="color:var(--rose);font-size:12.5px;display:none;"></p>
-        </div>
-
-        <!-- ---- BULK UPLOAD ---- -->
-        <div id="qzBulkWrap" style="display:none;">
+        <!-- ---- BULK UPLOAD — TOP BLOCK (Download Template + Upload control). Shown first, immediately on selecting Bulk Upload, before Section Distribution. Order is toggled in onQuizTypeChange(). ---- -->
+        <div id="qzBulkWrap" style="display:none;order:0;">
           <div class="upload-meta-row">
             <span>Download the template, fill in your questions, then upload the completed workbook.</span>
             <button class="btn btn-ghost btn-sm" onclick="downloadQuizTemplate()">⬇ Download Template</button>
@@ -4114,6 +4167,12 @@ function quizWizardMarkup(){
             <button class="btn btn-primary btn-sm" onclick="validateBulkUpload()" id="qzValidateBtn">Validate Upload</button>
           </div>
 
+          <!-- Imported question counts — Total / Easy / Medium / Hard — populated the moment the file finishes validating. -->
+          <div id="qzBulkImportedWrap" style="display:none;margin-top:20px;">
+            <div class="section-title">Questions Imported</div>
+            <div class="val-summary" id="qzBulkImportedStats" style="grid-template-columns:repeat(4,1fr);"></div>
+          </div>
+
           <div id="qzBulkSummaryWrap" style="display:none;margin-top:20px;">
             <div class="section-title">Validation Summary</div>
             <div class="val-summary" id="qzBulkValSummary"></div>
@@ -4123,12 +4182,67 @@ function quizWizardMarkup(){
                 <button class="btn btn-ghost btn-sm" onclick="downloadValidationReport()">⬇ Download Validation Report.xlsx</button>
               </div>
               <div class="table-wrap err-table" style="max-height:240px;overflow-y:auto;">
-                <table><thead><tr><th style="width:80px;">Row</th><th>Issue</th></tr></thead><tbody id="qzBulkErrorTbody"></tbody></table>
+                <table><thead><tr><th style="width:140px;">Sheet</th><th style="width:80px;">Row</th><th>Issue</th></tr></thead><tbody id="qzBulkErrorTbody"></tbody></table>
               </div>
             </div>
           </div>
           <p id="qzBulkError" style="color:var(--rose);font-size:12.5px;display:none;margin-top:10px;"></p>
+          <div class="section-divider"></div>
         </div>
+
+        <!-- ---- SECTION DISTRIBUTION (shown for both Manual and Bulk) ---- -->
+        <div id="qzSectionDistBlock" style="order:1;">
+          <div id="qzSectionDistWrap">
+            <div class="section-title">
+              Section Distribution
+            </div>
+            <p class="field-hint" id="qzSectionModeHint">Manual Entry: enter how many Hard/Medium/Easy questions you'll author per section — that becomes the pool (Available). Then set how many of each to actually Display to a student. Click a section's Update button to edit its numbers.</p>
+            <div id="qzSectionDistLoading" class="empty-state"><div class="e-ic">▦</div>Loading assessment sections…</div>
+            <div id="qzSectionDistRows" style="display:none;"></div>
+            <div class="total-q-banner" id="qzSectionDistTotalWrap" style="display:none;"><span>Total Available / To Display</span><span id="qzSectionDistTotal">0 / 0</span></div>
+            <p id="qzSectionDistError" style="color:var(--rose);font-size:12.5px;display:none;margin-top:8px;"></p>
+          </div>
+          <div class="section-divider"></div>
+        </div>
+
+        <!-- ---- MANUAL ENTRY ---- -->
+        <div id="qzManualWrap" style="order:2;">
+          <div class="qnav-bar">
+            <div>
+              <div class="qnav-title" id="qManualTitle">Question 1 of 0</div>
+              <div class="qnav-progress" id="qManualProgress">0 of 0 questions complete</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span class="q-status-chip incomplete" id="qCurrentStatusChip">Incomplete</span>
+              <button class="btn btn-ghost btn-sm" onclick="goToQuestion(qzCurrentQIndex-1)" id="qPrevQBtn">← Prev Q</button>
+              <button class="btn btn-ghost btn-sm" onclick="goToQuestion(qzCurrentQIndex+1)" id="qNextQBtn">Next Q →</button>
+            </div>
+          </div>
+          <div class="qnav-pager" id="qManualPager"></div>
+          <p class="field-hint" id="qManualSectionTag" style="margin-top:-8px;"></p>
+
+          <div class="field"><textarea placeholder=" " id="qText" oninput="autosaveCurrentQuestion()"></textarea><label>Question</label></div>
+
+          <div class="row-4">
+            <div class="field qzw-select-field"><label>Type</label>
+              <select id="qType" onchange="onQuestionTypeChange()">
+                <option value="single_choice">Single Choice</option>
+                <option value="multiple_choice">Multiple Choice</option>
+              </select>
+            </div>
+            <div class="field"><input type="text" id="qDifficultyBadge" readonly style="background:var(--paper-raised);cursor:not-allowed;"><label>Difficulty (auto)</label></div>
+            <div class="field"><input type="text" id="qSectionBadge" readonly style="background:var(--paper-raised);cursor:not-allowed;"><label>Section (auto)</label></div>
+            <div class="field"><input type="number" min="0" placeholder=" " id="qMarks" oninput="autosaveCurrentQuestion()"><label>Marks</label></div>
+          </div>
+
+          <div class="answer-grid" id="qOptionsGrid"></div>
+          <p class="field-hint" id="qAnswerHint">Check the box next to each correct option.</p>
+
+          <div class="field"><textarea placeholder=" " id="qExplanation" oninput="autosaveCurrentQuestion()"></textarea><label>Explanation (optional)</label></div>
+
+          <p id="qzManualError" style="color:var(--rose);font-size:12.5px;display:none;"></p>
+        </div>
+       </div>
       </div>
 
       <!-- ================= STEP 3: REVIEW ================= -->
@@ -4151,41 +4265,93 @@ function quizWizardMarkup(){
     </div>
   </div>
 </div>
+
+<!-- ============================================================ UPDATE QUESTION DISTRIBUTION MODAL (Create Quiz — Step 2, per-section "Update" button) ============================================================
+     Section-scoped editor: opened from a single section's card, shows only
+     that section's Total Available / Total to be Displayed plus its
+     Easy/Medium/Hard Available + Display breakdown. Saving writes the new
+     numbers back into qzSectionConfig for that section only (see
+     saveQuizStatsModal()) and re-renders the Section Distribution cards +
+     manual question queue immediately — other sections are untouched. -->
+<div class="qzw-overlay" id="qzStatsModal" style="display:none;">
+  <div class="qzw-modal">
+    <div class="qzw-modal-head"><h3 id="qzStatsModalTitle">Update Question Distribution</h3><button class="qzw-modal-close" onclick="closeQuizStatsModal()">✕</button></div>
+    <div class="qzw-modal-body">
+      <input type="hidden" id="qzStatsSectionName" value="">
+      <p class="field-hint" id="qzStatsHint" style="margin-top:0;">Review and adjust how many questions are Available and how many will be Displayed to this section's students, by difficulty.</p>
+
+      <div class="total-q-banner" style="margin-bottom:20px;"><span>Total Available / To Be Displayed</span><span id="qzStatsTotal">0 / 0</span></div>
+
+      <div class="section-title">Easy</div>
+      <div class="row-2">
+        <div class="field"><input type="number" min="0" placeholder=" " id="qzStatsEasyAvail" oninput="updateQzStatsTotals()"><label>Easy Questions Available</label></div>
+        <div class="field"><input type="number" min="0" placeholder=" " id="qzStatsEasyDisplay" oninput="updateQzStatsTotals()"><label>Easy Questions to be Displayed</label></div>
+      </div>
+
+      <div class="section-title">Medium</div>
+      <div class="row-2">
+        <div class="field"><input type="number" min="0" placeholder=" " id="qzStatsMediumAvail" oninput="updateQzStatsTotals()"><label>Medium Questions Available</label></div>
+        <div class="field"><input type="number" min="0" placeholder=" " id="qzStatsMediumDisplay" oninput="updateQzStatsTotals()"><label>Medium Questions to be Displayed</label></div>
+      </div>
+
+      <div class="section-title">Hard</div>
+      <div class="row-2">
+        <div class="field"><input type="number" min="0" placeholder=" " id="qzStatsHardAvail" oninput="updateQzStatsTotals()"><label>Hard Questions Available</label></div>
+        <div class="field"><input type="number" min="0" placeholder=" " id="qzStatsHardDisplay" oninput="updateQzStatsTotals()"><label>Hard Questions to be Displayed</label></div>
+      </div>
+
+      <p id="qzStatsError" style="color:var(--rose);font-size:12.5px;display:none;margin-top:6px;"></p>
+    </div>
+    <div class="qzw-modal-foot" style="justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeQuizStatsModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveQuizStatsModal()">Save & Update</button>
+    </div>
+  </div>
+</div>
 `;
 }
+
 
 /* ============================================================
    CREATE QUIZ WIZARD — ported verbatim from trainer.html's
    Assessment Management > Create Quiz module (Details → Questions
-   → Review, exact same fields/validation/IDs as trainer.html).
-   Data loading and save/publish are pointed at superadmin.html's
-   own platformApiGet/Put/Post + COLLEGES/QUIZZES globals instead
-   of trainer.html's /api/trainer/* endpoints — see getColleges(),
-   getSections(), saveQuizDraft() and publishQuiz() below for the
-   only behavioural adaptations made to fit this app. showToast()
-   calls also use superadmin's (message, isError) signature instead
-   of trainer.html's (message, icon) signature.
-   The old simplified wizard (openQuizWizard/qzState/QZ_SECTIONS) has
-   been removed — editQuiz()/viewQuiz()/toggleQuizStatus() below now
-   drive Edit/View/Publish from this same wizard, wired to the real
-   /api/admin/quizzes backend.
-============================================================ */
+   → Review, exact same fields/validation/IDs/state-model as
+   trainer.html, including the granular per-section Easy/Medium/Hard
+   Available+Display grid and its "Update" popup, qzStatsModal).
+   Data loading and save/publish are pointed at superadmin.html's own
+   platformApiGet/Put/Post + /admin/quizzes endpoints instead of
+   trainer.html's /api/trainer/* endpoints — see getColleges(),
+   getSections(), persistDraftSilently(), saveQuizDraft() and
+   publishQuiz() below for the only behavioural adaptations made to
+   fit this app. showToast() calls also use superadmin's
+   (message, isError) signature instead of trainer.html's
+   (message, icon) signature, and the quiz + stats modals are injected
+   into #modal-root / toggled via style.display rather than the
+   always-in-DOM .show class trainer.html uses, to match this app's
+   dynamic modal system. */
+
 function cohortTargetLabel(target){
-  return { A:'Cohort A', B:'Cohort B', C:'Cohort C', all:'All Cohorts', entry_level:'Entry Level (Pre-Cohort Assessment)' }[target] || target || '—';
+  return { A:'Cohort A', B:'Cohort B', C:'Cohort C', all:'All Cohorts', entry_level:'Entry Level' }[target] || target || '—';
 }
 
 let qzCurrentStep = 1;
-let qzColleges = [];               // [{id,name}] — from GET /api/trainer/colleges. No fallback: empty until the backend responds.
+let qzColleges = [];               // [{id,name}] — from GET /api/public/colleges. No fallback: empty until the backend responds.
 let qzCollegesSelected = new Set();
 let qzSections = [];                // [{id,name}] — from GET /assessment/sections. No fallback: empty until the backend responds.
-let qzSectionCounts = {};           // section id -> requested count, must sum to Questions Displayed
-let qzQuestions = [];               // manual-entry pool, one slot per "Questions to be Displayed"
+// Per-section granular config: { [sectionName]: {hardAvailable, mediumAvailable,
+// easyAvailable, hardDisplay, mediumDisplay, easyDisplay} }. Available = the
+// full authored/uploaded pool per difficulty; Display = how many of those a
+// student actually receives on their attempt. Mirrors quiz_module.py's
+// sectionConfig exactly, field for field.
+let qzSectionConfig = {};
+let qzQuestions = [];               // manual-entry pool, auto-sequenced from qzSectionConfig's *Available counts
 let qzCurrentQIndex = 0;
 let qzBulkFile = null;
-let qzBulkParsedRows = [];
-let qzBulkValidRows = [];          // normalized, ready-to-publish question objects
-let qzBulkErrors = [];             // [{row, message}]
+let qzBulkQuestions = [];          // questions returned by POST /quizzes/bulk-upload-validate
+let qzBulkErrors = [];             // [{row, issue}] returned by the same endpoint
+let qzBulkSectionSummary = {};     // { section: {available, hard, medium, easy} } from the backend parse
 let qzBulkValidated = false;
+let qzBankAvailability = {};       // { section: {hard, medium, easy} } — live counts from GET /admin/question-bank/summary (Part 6)
 let qzAutosaveTimer = null;
 let qzDraftPersistTimer = null;
 let qzEditingId = null;         // set when the wizard is editing an existing quiz (PUT instead of POST)
@@ -4194,7 +4360,9 @@ let qzDraftId = null;           // id of the in-progress draft doc, so repeated 
 /* GET /api/public/colleges — single source of truth shared with Student
    Registration and the Trainer Create Quiz wizard. Returns [] if the
    endpoint isn't reachable yet or has no active colleges; the UI shows
-   "No colleges available." until real data exists. */
+   "No colleges available." until real data exists. Pointed at superadmin's
+   own platformApiGet + /public/colleges instead of trainer.html's publicApi
+   — the only behavioural adaptation made to fit this app. */
 async function getColleges(){
   const res = await platformApiGet('/public/colleges');
   const arr = res.ok ? pickArray(res.data, 'colleges') : null;
@@ -4203,7 +4371,9 @@ async function getColleges(){
 }
 /* GET /assessment/sections — production contract, no hardcoded fallback.
    Drives both the Section Distribution panel and each manual question's
-   assigned section. Returns [] until the backend has sections configured. */
+   assigned section. Returns [] until the backend has sections configured.
+   Pointed at /admin/assessment/sections instead of trainer.html's
+   /assessment/sections — the only other behavioural adaptation. */
 async function getSections(){
   const res = await platformApiGet('/admin/assessment/sections');
   if(res.ok && Array.isArray(res.data)){
@@ -4217,7 +4387,7 @@ async function getSections(){
 
 function escAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function getQuizType(){ const el = document.querySelector('input[name="qzType"]:checked'); return el ? el.value : 'manual'; }
-function blankQuestion(){ return { text:'', options:['','','',''], correct:[], type:'single_choice', difficulty:'', marks:'', explanation:'', section:'' }; }
+function blankQuestion(section, difficulty){ return { text:'', options:['','','',''], correct:[], type:'single_choice', difficulty: difficulty||'', marks:'', explanation:'', section: section||'' }; }
 
 /* ---------------------------------------------------------------- Applicable Colleges: searchable multi-select ---------------------------------------------------------------- */
 function toggleCollegesPanel(){
@@ -4285,47 +4455,46 @@ function updateCollegesTriggerUI(){
 /* ---------------------------------------------------------------- Step 1: Assessment Details ---------------------------------------------------------------- */
 function onQuizTypeChange(type){
   document.querySelectorAll('#qzTypeCards .radio-card').forEach(c => c.classList.toggle('checked', c.dataset.qtype===type));
-  if(document.getElementById('qzAvailable') && (type==='manual' || qzBulkValidated)) syncQuestionsAvailable();
-}
-/* Questions Available is no longer typed in — it is derived from the
-   live question pool: the count of manually created questions, or the
-   count of valid questions detected in the most recently uploaded/validated
-   Excel file. Called on every add/remove/upload so it never goes stale
-   (Requirements 1 & 5). */
-function currentPoolCount(){
-  return getQuizType()==='manual' ? qzQuestions.length : qzBulkValidRows.length;
-}
-function syncQuestionsAvailable(){
-  const el = document.getElementById('qzAvailable');
-  if(el) el.value = currentPoolCount();
-  if(document.getElementById('qzSectionDistRows')) renderSectionDistribution();
-  updateFooterLabels();
-}
-function onDisplayedChange(){
-  updateDifficultyHint();
-  refreshSectionDistributionDefaults();
-}
-function updateDifficultyHint(){
-  const hint = document.getElementById('qzDifficultyHint');
-  const displayed = parseInt(document.getElementById('qzDisplayed').value) || 0;
-  const eVal = document.getElementById('qzEasy').value, mVal = document.getElementById('qzMedium').value, hVal = document.getElementById('qzHard').value;
-  if(!eVal && !mVal && !hVal){
-    hint.textContent = 'Leave blank to skip a fixed difficulty split. If set, Easy + Medium + Hard must equal Questions to be Displayed.';
-    hint.style.color = '';
-    return;
+  // Reorder Step 2: Bulk Upload's Download Template + Upload control move to
+  // the very top of the step, ahead of Section Distribution, the moment
+  // Bulk Upload is selected — no need to scroll past the distribution panel
+  // before you can even pick a file. Manual Entry keeps Section Distribution
+  // first (you're defining the pool you're about to author) followed by the
+  // question authoring UI. Question Bank mode (Part 6) shows neither an
+  // upload control nor a question-authoring UI — just Section Distribution,
+  // with Available always read from the live shared bank.
+  const bulkWrap = document.getElementById('qzBulkWrap');
+  const distBlock = document.getElementById('qzSectionDistBlock');
+  const manualWrap = document.getElementById('qzManualWrap');
+  if(type==='bulk'){
+    bulkWrap.style.display = ''; bulkWrap.style.order = '0';
+    distBlock.style.order = '1';
+    manualWrap.style.display = 'none';
+  } else if(type==='question_bank'){
+    bulkWrap.style.display = 'none';
+    manualWrap.style.display = 'none';
+    distBlock.style.order = '0';
+  } else {
+    manualWrap.style.display = ''; manualWrap.style.order = '1';
+    distBlock.style.order = '0';
+    bulkWrap.style.display = 'none';
   }
-  const sum = (parseInt(eVal)||0) + (parseInt(mVal)||0) + (parseInt(hVal)||0);
-  if(sum === displayed){ hint.textContent = `${sum} / ${displayed} questions allocated — matches Questions Displayed.`; hint.style.color = 'var(--teal-dark)'; }
-  else { hint.textContent = `${sum} / ${displayed} allocated — Easy + Medium + Hard must equal Questions to be Displayed (${displayed}).`; hint.style.color = 'var(--rose)'; }
+  if(qzSections.length){ renderSectionDistribution(); }
+  if(type==='manual') buildManualQueueFromSectionConfig();
 }
-// See trainer.html for full rationale: datetime-local values have no
-// timezone offset, so they must be converted through Date() to get a
-// correct UTC ISO string instead of being sent as raw local wall-clock text.
+// datetime-local inputs give "YYYY-MM-DDTHH:mm" with NO timezone offset —
+// new Date(...) parses that as the browser's *local* time, so .toISOString()
+// correctly converts it to UTC. Sending the raw string instead (as before)
+// made the backend interpret the trainer's local wall-clock time as if it
+// were already UTC, shifting every quiz's Live window by the trainer's UTC
+// offset — the root cause of quizzes not appearing when expected.
 function localInputToISO(value){
   if(!value) return '';
   const d = new Date(value);
   return isNaN(d.getTime()) ? '' : d.toISOString();
 }
+// Inverse, for repopulating a datetime-local input from a stored UTC ISO
+// string when editing an existing quiz.
 function isoToLocalInput(iso){
   if(!iso) return '';
   const d = new Date(iso);
@@ -4334,7 +4503,6 @@ function isoToLocalInput(iso){
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 function collectStep1(){
-  const easyRaw = document.getElementById('qzEasy').value, medRaw = document.getElementById('qzMedium').value, hardRaw = document.getElementById('qzHard').value;
   return {
     name: document.getElementById('qzName').value.trim(),
     cohort: document.getElementById('qzCohort').value,
@@ -4342,13 +4510,8 @@ function collectStep1(){
     collegeNames: qzColleges.filter(c=>qzCollegesSelected.has(c.id)).map(c=>c.name),
     start: localInputToISO(document.getElementById('qzStart').value),
     end: localInputToISO(document.getElementById('qzEnd').value),
-    available: parseInt(document.getElementById('qzAvailable').value) || 0,
-    displayed: parseInt(document.getElementById('qzDisplayed').value) || 0,
     duration: parseInt(document.getElementById('qzDuration').value) || 0,
     quizType: getQuizType(),
-    easy: easyRaw === '' ? null : (parseInt(easyRaw)||0),
-    medium: medRaw === '' ? null : (parseInt(medRaw)||0),
-    hard: hardRaw === '' ? null : (parseInt(hardRaw)||0),
   };
 }
 function validateStep1(){
@@ -4359,40 +4522,26 @@ function validateStep1(){
   if(!d.colleges.length) return fail('Select at least one applicable college.');
   if(!d.start || !d.end) return fail('Both quiz start and end date/time are required.');
   if(new Date(d.end) <= new Date(d.start)) return fail('End date must be greater than start date.');
-  if(!d.displayed || d.displayed < 1) return fail('Enter the number of questions to display.');
   if(!d.duration || d.duration < 1) return fail('Enter the quiz duration in minutes.');
-  if(d.easy !== null || d.medium !== null || d.hard !== null){
-    const sum = (d.easy||0) + (d.medium||0) + (d.hard||0);
-    if(sum !== d.displayed) return fail(`Easy + Medium + Hard (${sum}) must equal Questions to be Displayed (${d.displayed}).`);
-  }
   errEl.style.display = 'none';
   return true;
 }
 
-/* ---------------------------------------------------------------- Step 2: Section Distribution (Issues 1, 7, 8) ---------------------------------------------------------------- */
-/* Sections come from GET /assessment/sections (see getSections() above) —
-   nothing here is hardcoded. Counts must always sum to Questions to be
-   Displayed, never Questions Available. Shown for both Manual Entry and
-   Bulk Upload, before question entry starts. */
+/* ---------------------------------------------------------------- Step 2: Section Distribution (8 fields per section) ---------------------------------------------------------------- */
+/* Sections come from GET /assessment/sections — nothing here is
+   hardcoded. For every section the admin configures 8 numbers:
+     Hard/Medium/Easy Available  (the pool actually authored/uploaded)
+     Hard/Medium/Easy Display    (how many of those a student receives)
+   with Available = sum of its 3 Available fields and Display = sum of
+   its 3 Display fields, enforced live here and re-verified authoritatively
+   by quiz_module.validate_section_config() on the backend before save. */
 async function ensureSectionsLoaded(){
   if(qzSections.length) return;
   qzSections = await getSections();
+  qzSections.forEach(s => { if(!qzSectionConfig[s.name]) qzSectionConfig[s.name] = blankSectionConfig(); });
 }
-function evenSplit(total, buckets){
-  if(buckets<=0) return [];
-  const base = Math.floor(total/buckets), extra = total % buckets;
-  return Array.from({length:buckets}, (_,i)=> base + (i<extra?1:0));
-}
-function refreshSectionDistributionDefaults(){
-  const displayed = parseInt(document.getElementById('qzDisplayed').value) || 0;
-  if(!qzSections.length) return;
-  const currentTotal = qzSections.reduce((a,s)=>a+(qzSectionCounts[s.id]||0),0);
-  // Only auto-rebalance if counts haven't been touched yet or no longer make sense against the new Displayed total.
-  if(currentTotal === 0 || currentTotal !== displayed){
-    const split = evenSplit(displayed, qzSections.length);
-    qzSections.forEach((s,i)=> qzSectionCounts[s.id] = Math.min(split[i], categoryCap(s)));
-  }
-  renderSectionDistribution();
+function blankSectionConfig(){
+  return { hardAvailable:0, mediumAvailable:0, easyAvailable:0, hardDisplay:0, mediumDisplay:0, easyDisplay:0 };
 }
 async function renderSectionDistributionPanel(){
   document.getElementById('qzSectionDistLoading').style.display = '';
@@ -4404,92 +4553,80 @@ async function renderSectionDistributionPanel(){
     return;
   }
   document.getElementById('qzSectionDistLoading').style.display = 'none';
-  hideCategoryLimitError();
-  refreshSectionDistributionDefaults();
+  const isBulk = getQuizType()==='bulk';
+  const isBank = getQuizType()==='question_bank';
+  if(isBank){
+    // Part 6: Question Bank mode skips upload/authoring entirely — Available
+    // always comes live from the shared QuestionBank, refreshed every time
+    // this step is opened so it can never go stale mid-session.
+    const res = await platformApiGet('/admin/question-bank/summary');
+    qzBankAvailability = (res.ok && res.data.summary) ? res.data.summary : {};
+    qzSections.forEach(s => {
+      const bank = qzBankAvailability[s.name] || { hard:0, medium:0, easy:0 };
+      const cfg = qzSectionConfig[s.name] || (qzSectionConfig[s.name] = blankSectionConfig());
+      cfg.hardAvailable = bank.hard || 0;
+      cfg.mediumAvailable = bank.medium || 0;
+      cfg.easyAvailable = bank.easy || 0;
+    });
+  }
+  document.getElementById('qzSectionModeHint').textContent = isBank
+    ? "Question Bank: Available counts are read-only, live from the platform's shared Question Bank. Click a section's Update button to set how many of each to Display — a fresh random set is drawn when you publish."
+    : isBulk
+    ? "Bulk Upload: Available counts are read-only, auto-filled from your uploaded Excel file. Click a section's Update button to review and set how many of each to Display."
+    : "Manual Entry: click a section's Update button to enter how many Hard/Medium/Easy questions you'll author (Available) and how many of each to Display to a student.";
+  renderSectionDistribution();
 }
-/* Category ("Question Distribution") availability — Requirement 3.
-   Computed live from whichever pool is authoritative for the current
-   Quiz Type: manually authored questions (with a Section chosen) for
-   Manual Entry, or the validated rows parsed from the uploaded Excel
-   for Bulk Upload. Never cached — always recomputed from the live pool. */
-function categoryAvailability(){
-  const pool = getQuizType()==='manual' ? qzQuestions : qzBulkValidRows;
-  const map = {};
-  pool.forEach(q => { const key = (q.section||'').trim().toLowerCase(); if(key) map[key] = (map[key]||0) + 1; });
-  return map;
-}
-/* Whether we actually know per-category availability yet — i.e. there's
-   a real pool to count (a validated bulk file, or at least one manually
-   authored question). Before that, counts are left uncapped so the
-   pre-existing Section Distribution behavior is unaffected. */
-function categoryAvailabilityKnown(){
-  return getQuizType()==='manual' ? qzQuestions.length>0 : qzBulkValidated;
-}
-function categoryCap(section){
-  if(!categoryAvailabilityKnown()) return Infinity;
-  return categoryAvailability()[(section.name||'').trim().toLowerCase()] || 0;
-}
-function showCategoryLimitError(name, cap){
-  const el = document.getElementById('qzCategoryLimitError');
-  if(!el) return;
-  el.textContent = `${name} cannot exceed ${cap} available question${cap===1?'':'s'} — that's how many were detected for this category.`;
-  el.style.display = '';
-}
-function hideCategoryLimitError(){
-  const el = document.getElementById('qzCategoryLimitError');
-  if(el) el.style.display = 'none';
-}
+/* Clean, uncluttered cards — one per assessment section — showing only
+   basic info (name + running Available/Display totals) plus a single
+   Update button. No per-field inputs live on the main page; all detailed
+   Easy/Medium/Hard Available/Display editing happens in the section-scoped
+   qzStatsModal opened via openQuizStatsModal(sectionName). */
 function renderSectionDistribution(){
   const wrap = document.getElementById('qzSectionDistRows');
   wrap.style.display = '';
-  const known = categoryAvailabilityKnown();
-  const avail = categoryAvailability();
   wrap.innerHTML = qzSections.map(s => {
-    const cap = known ? (avail[s.name.trim().toLowerCase()]||0) : null;
-    return `
-    <div class="section-count-row">
-      <span class="sc-label">${escAttr(s.name)}${cap!=null ? ` <span style="color:var(--text-soft);font-weight:500;">(${cap} Available)</span>` : ''}</span>
-      <div class="stepper-input">
-        <button type="button" onclick="stepSectionCount('${s.id}',-1)">−</button>
-        <input type="number" min="0"${cap!=null?` max="${cap}"`:''} value="${qzSectionCounts[s.id]||0}" onchange="setSectionCount('${s.id}', this.value)">
-        <button type="button" onclick="stepSectionCount('${s.id}',1)">＋</button>
+    const cfg = qzSectionConfig[s.name] || (qzSectionConfig[s.name] = blankSectionConfig());
+    const avail = cfg.hardAvailable + cfg.mediumAvailable + cfg.easyAvailable;
+    const disp = cfg.hardDisplay + cfg.mediumDisplay + cfg.easyDisplay;
+    const dispOk = disp <= avail;
+    return `<div class="section-count-row">
+      <div>
+        <div class="sc-label">${escAttr(s.name)}</div>
+        <div style="font-size:12px;color:var(--text-soft);margin-top:2px;">Available: <span class="mono">${avail}</span> &nbsp;•&nbsp; To Display: <span class="mono" style="color:${dispOk?'inherit':'var(--rose)'};">${disp}</span></div>
       </div>
+      <button type="button" class="btn btn-ghost btn-sm" style="text-transform:none;letter-spacing:normal;font-weight:600;" onclick="openQuizStatsModal('${escAttr(s.name)}')">✎ Update</button>
     </div>`;
   }).join('');
   updateSectionDistTotal();
 }
-function stepSectionCount(id, delta){
-  const s = qzSections.find(x=>x.id===id);
-  const cap = s ? categoryCap(s) : Infinity;
-  const next = Math.max(0, Math.min((qzSectionCounts[id]||0) + delta, cap));
-  if(delta>0 && next===(qzSectionCounts[id]||0) && cap!==Infinity) showCategoryLimitError(s.name, cap);
-  else hideCategoryLimitError();
-  qzSectionCounts[id] = next;
+function setSectionField(sectionName, field, val){
+  const cfg = qzSectionConfig[sectionName] || (qzSectionConfig[sectionName] = blankSectionConfig());
+  cfg[field] = Math.max(0, parseInt(val) || 0);
   renderSectionDistribution();
+  if(getQuizType()==='manual' && field.endsWith('Available')) buildManualQueueFromSectionConfig();
 }
-function setSectionCount(id, val){
-  const s = qzSections.find(x=>x.id===id);
-  const cap = s ? categoryCap(s) : Infinity;
-  let next = Math.max(0, parseInt(val) || 0);
-  if(next > cap){ next = cap; showCategoryLimitError(s.name, cap); }
-  else hideCategoryLimitError();
-  qzSectionCounts[id] = next;
-  renderSectionDistribution();
-}
-function sectionDistTotal(){
-  return qzSections.reduce((a,s)=>a+(qzSectionCounts[s.id]||0),0);
+function sectionConfigTotals(){
+  let available = 0, display = 0;
+  qzSections.forEach(s => {
+    const cfg = qzSectionConfig[s.name] || blankSectionConfig();
+    available += cfg.hardAvailable + cfg.mediumAvailable + cfg.easyAvailable;
+    display += cfg.hardDisplay + cfg.mediumDisplay + cfg.easyDisplay;
+  });
+  return { available, display };
 }
 function updateSectionDistTotal(){
-  const displayed = parseInt(document.getElementById('qzDisplayed').value) || 0;
-  const total = sectionDistTotal();
+  const { available, display } = sectionConfigTotals();
   const totalWrap = document.getElementById('qzSectionDistTotalWrap');
   totalWrap.style.display = '';
-  document.getElementById('qzSectionDistTotal').textContent = `${total} / ${displayed}`;
+  document.getElementById('qzSectionDistTotal').textContent = `${available} / ${display}`;
   const errEl = document.getElementById('qzSectionDistError');
-  const ok = total === displayed;
+  const ok = available > 0 && display > 0 && display <= available;
+  if(!ok){
+    errEl.textContent = available===0 ? 'Configure at least one section with Available questions.'
+      : (display===0 ? 'Set how many questions to Display for at least one section.' : 'Total to Display cannot exceed Total Available.');
+  }
   errEl.style.display = ok ? 'none' : '';
   totalWrap.querySelector('span:last-child').style.color = ok ? 'var(--teal-dark)' : 'var(--rose)';
-  if(getQuizType()==='manual') refreshManualSectionTags();
   updateFooterLabels();
   return ok;
 }
@@ -4499,51 +4636,144 @@ function validateSectionDistribution(){
     document.getElementById('qzSectionDistError').style.display = '';
     return false;
   }
-  const displayed = parseInt(document.getElementById('qzDisplayed').value) || 0;
-  const ok = sectionDistTotal() === displayed;
-  document.getElementById('qzSectionDistError').textContent = 'Section distribution must equal the number of questions to be displayed.';
-  document.getElementById('qzSectionDistError').style.display = ok ? 'none' : '';
-  return ok;
+  return updateSectionDistTotal();
 }
-/* Section is now chosen explicitly per question (see #qSection in the
-   manual entry form) rather than auto-derived from position, since the
-   manual pool (Questions Available) can be larger than the Section
-   Distribution total (Questions Displayed) once Available != Displayed. */
-function refreshManualSectionTags(){
-  renderQuestionPager();
+
+/* ---------------------------------------------------------------- "Update" modal: per-section Available/Display editor ----------------------------------------------------------------
+   Each assessment section card on the main Step 2 page carries its own
+   Update button (see renderSectionDistribution). Clicking it opens this
+   modal scoped to exactly that one section — qzStatsSectionName (a hidden
+   field) tracks which section is currently being edited. The modal shows
+   only that section's Total Available / Total to be Displayed plus its
+   Easy/Medium/Hard Available + Display breakdown. Saving writes the new
+   numbers back into qzSectionConfig[sectionName] only — every other
+   section's data is left completely untouched — then re-renders the
+   Section Distribution cards + manual question queue and closes the modal. */
+async function openQuizStatsModal(sectionName){
+  await ensureSectionsLoaded();
+  if(!qzSections.length){ showToast('Add assessment sections before updating question distribution.', true); return; }
+  if(!sectionName || !qzSectionConfig.hasOwnProperty(sectionName)){
+    showToast('Select a section to update.', true);
+    return;
+  }
+  const isBulk = getQuizType()==='bulk';
+  const isBank = getQuizType()==='question_bank';
+  const cfg = qzSectionConfig[sectionName] || (qzSectionConfig[sectionName] = blankSectionConfig());
+  document.getElementById('qzStatsSectionName').value = sectionName;
+  document.getElementById('qzStatsModalTitle').textContent = `Update Question Distribution — ${sectionName}`;
+  document.getElementById('qzStatsEasyAvail').value = cfg.easyAvailable;
+  document.getElementById('qzStatsMediumAvail').value = cfg.mediumAvailable;
+  document.getElementById('qzStatsHardAvail').value = cfg.hardAvailable;
+  document.getElementById('qzStatsEasyDisplay').value = cfg.easyDisplay;
+  document.getElementById('qzStatsMediumDisplay').value = cfg.mediumDisplay;
+  document.getElementById('qzStatsHardDisplay').value = cfg.hardDisplay;
+  ['qzStatsEasyAvail','qzStatsMediumAvail','qzStatsHardAvail'].forEach(id => {
+    const el = document.getElementById(id);
+    el.readOnly = isBulk || isBank;
+    el.style.background = (isBulk||isBank) ? 'var(--paper-raised)' : '';
+    el.style.cursor = (isBulk||isBank) ? 'not-allowed' : '';
+  });
+  document.getElementById('qzStatsHint').textContent = isBank
+    ? `Available counts for ${sectionName} are live from the shared Question Bank and are read-only here. Adjust how many of each difficulty to Display — a fresh random set is drawn from the bank when you publish.`
+    : isBulk
+    ? `Available counts for ${sectionName} come from your uploaded Excel file and are pre-filled/read-only here. Adjust how many of each difficulty to Display.`
+    : `Adjust how many questions are Available (the pool you'll author for ${sectionName}) and how many to Display to each student, by difficulty.`;
+  updateQzStatsTotals();
+  document.getElementById('qzStatsError').style.display = 'none';
+  document.getElementById('qzStatsModal').style.display = 'flex';
+}
+function updateQzStatsTotals(){
+  const easyAvail = Math.max(0, parseInt(document.getElementById('qzStatsEasyAvail').value) || 0);
+  const medAvail = Math.max(0, parseInt(document.getElementById('qzStatsMediumAvail').value) || 0);
+  const hardAvail = Math.max(0, parseInt(document.getElementById('qzStatsHardAvail').value) || 0);
+  const easyDisp = Math.max(0, parseInt(document.getElementById('qzStatsEasyDisplay').value) || 0);
+  const medDisp = Math.max(0, parseInt(document.getElementById('qzStatsMediumDisplay').value) || 0);
+  const hardDisp = Math.max(0, parseInt(document.getElementById('qzStatsHardDisplay').value) || 0);
+  const totalAvail = easyAvail + medAvail + hardAvail;
+  const totalDisp = easyDisp + medDisp + hardDisp;
+  document.getElementById('qzStatsTotal').textContent = `${totalAvail} / ${totalDisp}`;
+  const errEl = document.getElementById('qzStatsError');
+  const ok = totalDisp <= totalAvail;
+  errEl.textContent = ok ? '' : 'Total to be Displayed cannot exceed Total Available.';
+  errEl.style.display = ok ? 'none' : '';
+  document.getElementById('qzStatsTotal').style.color = ok ? 'var(--teal-dark)' : 'var(--rose)';
+  return { easyAvailable:easyAvail, mediumAvailable:medAvail, hardAvailable:hardAvail, easyDisplay:easyDisp, mediumDisplay:medDisp, hardDisplay:hardDisp, ok };
+}
+function closeQuizStatsModal(){ const el = document.getElementById('qzStatsModal'); if(el) el.style.display = 'none'; }
+function saveQuizStatsModal(){
+  const sectionName = document.getElementById('qzStatsSectionName').value;
+  if(!sectionName){ closeQuizStatsModal(); return; }
+  const isBulk = getQuizType()==='bulk';
+  const isBank = getQuizType()==='question_bank';
+  const stats = updateQzStatsTotals();
+  if(!stats.ok){ return; }
+  if(isBulk || isBank){
+    // Available is read-only in both modes — auto-filled from the
+    // uploaded file (Bulk) or the live shared bank (Question Bank).
+    // Only this section's Display split can actually change here.
+    const current = qzSectionConfig[sectionName] || blankSectionConfig();
+    stats.easyAvailable = current.easyAvailable;
+    stats.mediumAvailable = current.mediumAvailable;
+    stats.hardAvailable = current.hardAvailable;
+    if(stats.easyDisplay + stats.mediumDisplay + stats.hardDisplay > stats.easyAvailable + stats.mediumAvailable + stats.hardAvailable){
+      document.getElementById('qzStatsError').textContent = 'Total to be Displayed cannot exceed Total Available.';
+      document.getElementById('qzStatsError').style.display = '';
+      return;
+    }
+  }
+  // Update only this section's entry in qzSectionConfig — every other
+  // section's config object is left exactly as it was.
+  qzSectionConfig[sectionName] = {
+    easyAvailable: stats.easyAvailable, mediumAvailable: stats.mediumAvailable, hardAvailable: stats.hardAvailable,
+    easyDisplay: stats.easyDisplay, mediumDisplay: stats.mediumDisplay, hardDisplay: stats.hardDisplay
+  };
+  renderSectionDistribution();
+  if(getQuizType()==='manual') buildManualQueueFromSectionConfig();
+  closeQuizStatsModal();
+  showToast(`${sectionName} question distribution updated`);
 }
 
 /* ---------------------------------------------------------------- Step 2: Manual Entry ---------------------------------------------------------------- */
-/* Manual pool is now grown/shrunk explicitly by the admin (Add/Remove
-   Question) instead of being pre-sized from a typed "Questions Available"
-   number — Questions Available is the *result* of this pool, not its input
-   (Requirement 1). */
-function addManualQuestion(){
-  autosaveCurrentQuestion(true);
-  qzQuestions.push(blankQuestion());
-  qzCurrentQIndex = qzQuestions.length - 1;
-  syncQuestionsAvailable();
-  renderCurrentQuestion();
-}
-function removeManualQuestion(){
-  if(!qzQuestions.length) return;
-  qzQuestions.splice(qzCurrentQIndex, 1);
-  if(qzCurrentQIndex >= qzQuestions.length) qzCurrentQIndex = Math.max(0, qzQuestions.length - 1);
-  syncQuestionsAvailable();
-  renderCurrentQuestion();
+/* Builds/rebuilds the manual-entry queue directly from qzSectionConfig's
+   *Available counts — one slot per Available question, grouped Hard block
+   then Medium block then Easy block within each section, sections in the
+   order returned by GET /assessment/sections. Already-entered text/options
+   are preserved by keying on (section, difficulty, position-within-that-
+   difficulty-bucket) so tweaking one section's counts doesn't wipe out
+   work already done on the others. */
+function buildManualQueueFromSectionConfig(){
+  const existingByKey = {};
+  qzQuestions.forEach(q => {
+    const key = `${q.section}|${q.difficulty}`;
+    (existingByKey[key] = existingByKey[key] || []).push(q);
+  });
+  const next = [];
+  qzSections.forEach(s => {
+    const cfg = qzSectionConfig[s.name] || blankSectionConfig();
+    [['Hard','hardAvailable'],['Medium','mediumAvailable'],['Easy','easyAvailable']].forEach(([label, field]) => {
+      const count = cfg[field] || 0;
+      const bucket = existingByKey[`${s.name}|${label}`] || [];
+      for(let i=0;i<count;i++){
+        next.push(bucket[i] || blankQuestion(s.name, label));
+      }
+    });
+  });
+  qzQuestions = next;
+  if(qzCurrentQIndex >= qzQuestions.length) qzCurrentQIndex = Math.max(0, qzQuestions.length-1);
+  renderQuestionPager();
+  updateFooterLabels();
 }
 function isQuestionComplete(q){
   if(!q) return false;
   const filledOptions = (q.options||[]).filter(o=>o && String(o).trim()).length;
   const correctCount = (q.correct||[]).length;
   const correctOk = q.type==='single_choice' ? correctCount===1 : correctCount>=1;
-  const sectionOk = !qzSections.length || !!q.section;
-  return !!(q.text && q.text.trim()) && filledOptions>=2 && correctOk && !!q.type && sectionOk &&
-    q.marks!=='' && q.marks!=null && !isNaN(parseFloat(q.marks)) && !!q.difficulty;
+  return !!(q.text && q.text.trim()) && filledOptions>=2 && correctOk && !!q.type &&
+    q.marks!=='' && q.marks!=null && !isNaN(parseFloat(q.marks));
 }
 function renderQuestionPager(){
   document.getElementById('qManualPager').innerHTML = qzQuestions.map((q,i)=>
-    `<div class="qnav-dot ${i===qzCurrentQIndex?'current':''} ${isQuestionComplete(q)?'complete':''}" onclick="goToQuestion(${i})">${i+1}</div>`
+    `<div class="qnav-dot ${i===qzCurrentQIndex?'current':''} ${isQuestionComplete(q)?'complete':''}" onclick="goToQuestion(${i})" title="${escAttr(q.section)} · ${escAttr(q.difficulty)}">${i+1}</div>`
   ).join('');
 }
 function goToQuestion(i){
@@ -4563,28 +4793,20 @@ function renderCurrentQuestion(){
   chip.textContent = complete ? 'Complete' : 'Incomplete';
   chip.className = 'q-status-chip ' + (complete ? 'complete' : 'incomplete');
 
-  document.getElementById('qManualSectionTag').textContent = qzSections.length
-    ? 'Section is required for every question when a Section Distribution is set below.' : '';
+  document.getElementById('qManualSectionTag').textContent = n
+    ? `Question order follows Section Distribution below — Section and Difficulty are set automatically.` : '';
   document.getElementById('qPrevQBtn').disabled = qzCurrentQIndex<=0;
   document.getElementById('qNextQBtn').disabled = qzCurrentQIndex>=n-1;
-  document.getElementById('qRemoveQBtn').disabled = n<=0;
   document.getElementById('qText').value = q.text;
   document.getElementById('qType').value = q.type || 'single_choice';
   renderOptionsGrid(q);
-  document.getElementById('qDifficulty').value = q.difficulty || '';
-  populateSectionSelect();
-  document.getElementById('qSection').value = q.section || '';
+  document.getElementById('qDifficultyBadge').value = q.difficulty || '—';
+  document.getElementById('qSectionBadge').value = q.section || '—';
   document.getElementById('qMarks').value = q.marks === '' || q.marks == null ? '' : q.marks;
   document.getElementById('qExplanation').value = q.explanation || '';
   document.getElementById('qzManualError').style.display = 'none';
   renderQuestionPager();
   updateFooterLabels();
-}
-function populateSectionSelect(){
-  const sel = document.getElementById('qSection');
-  const current = sel.value;
-  sel.innerHTML = '<option value="">Select…</option>' + qzSections.map(s=>`<option value="${escAttr(s.name)}">${escAttr(s.name)}</option>`).join('');
-  sel.value = current;
 }
 function renderOptionsGrid(q){
   const letters = ['A','B','C','D'];
@@ -4636,8 +4858,7 @@ function autosaveCurrentQuestion(silent){
   const q = qzQuestions[qzCurrentQIndex]; if(!q) return;
   q.text = document.getElementById('qText').value;
   q.type = document.getElementById('qType').value;
-  q.difficulty = document.getElementById('qDifficulty').value;
-  q.section = document.getElementById('qSection').value;
+  // q.difficulty / q.section are auto-assigned by buildManualQueueFromSectionConfig() — never user-edited.
   q.marks = document.getElementById('qMarks').value;
   q.explanation = document.getElementById('qExplanation').value;
   const complete = isQuestionComplete(q);
@@ -4647,7 +4868,6 @@ function autosaveCurrentQuestion(silent){
   renderQuestionPager();
   const completeCount = qzQuestions.filter(isQuestionComplete).length;
   document.getElementById('qManualProgress').textContent = `${completeCount} of ${qzQuestions.length} questions complete`;
-  if(document.getElementById('qzSectionDistRows')) renderSectionDistribution();
   if(!silent) persistDraftSilently();
 }
 function persistDraftSilently(){
@@ -4660,38 +4880,28 @@ function persistDraftSilently(){
 
 /* ---------------------------------------------------------------- Step 2: Bulk Upload ---------------------------------------------------------------- */
 function downloadQuizTemplate(){
-  const headers = ['Question','Option A','Option B','Option C','Option D','Correct Answer(s)','Difficulty','Marks','Type','Section','Explanation'];
-  const sample = [
-    ['What is the time complexity of binary search?','O(n)','O(log n)','O(n^2)','O(1)','B','Easy',2,'Single Choice','Programming','Binary search halves the search space every step.'],
-    ['Which of these are valid HTTP methods? (select all that apply)','GET','POST','FETCH','DELETE','A,B,D','Medium',3,'Multiple Choice','Programming','FETCH is a JS API, not an HTTP method.'],
-  ];
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...sample]);
-  ws['!cols'] = headers.map(()=>({ wch:24 }));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Questions');
-  XLSX.writeFile(wb, 'quiz_question_template.xlsx');
-  showToast('Template downloaded');
+  window.open(PLATFORM_API + '/admin/quizzes/bulk-upload-template', '_blank');
 }
 function qzBulkFileSelected(files){
   const f = files && files[0];
   if(!f) return;
   if(!/\.(xlsx|xls)$/i.test(f.name)){ showBulkError('Unsupported file type — please upload .xlsx or .xls'); return; }
   qzBulkFile = f;
-  qzBulkValidated = false; qzBulkErrors = []; qzBulkValidRows = []; qzBulkParsedRows = [];
+  qzBulkValidated = false; qzBulkErrors = []; qzBulkQuestions = []; qzBulkSectionSummary = {};
   document.getElementById('qzBulkFileChip').innerHTML = `<div class="upload-meta-row" style="margin-top:14px;"><span>📄 ${escAttr(f.name)}</span><button class="btn btn-ghost btn-sm" onclick="clearBulkFile()">Remove</button></div>`;
   document.getElementById('qzBulkValidateRow').style.display = '';
   document.getElementById('qzBulkSummaryWrap').style.display = 'none';
+  document.getElementById('qzBulkImportedWrap').style.display = 'none';
   document.getElementById('qzBulkError').style.display = 'none';
-  syncQuestionsAvailable();   // stale until this file is (re)validated — never show cached/previous counts
   updateFooterLabels();
 }
 function clearBulkFile(){
-  qzBulkFile = null; qzBulkValidated = false; qzBulkErrors = []; qzBulkValidRows = []; qzBulkParsedRows = [];
+  qzBulkFile = null; qzBulkValidated = false; qzBulkErrors = []; qzBulkQuestions = []; qzBulkSectionSummary = {};
   document.getElementById('qzBulkFileChip').innerHTML = '';
   document.getElementById('qzBulkFileInput').value = '';
   document.getElementById('qzBulkValidateRow').style.display = 'none';
   document.getElementById('qzBulkSummaryWrap').style.display = 'none';
-  syncQuestionsAvailable();
+  document.getElementById('qzBulkImportedWrap').style.display = 'none';
   updateFooterLabels();
 }
 function qzBulkDrop(e){
@@ -4700,141 +4910,96 @@ function qzBulkDrop(e){
 }
 function showBulkError(msg){ const el = document.getElementById('qzBulkError'); el.textContent = msg; el.style.display = ''; }
 
-/* Client-side mirror of the mandatory backend validation described in
-   the spec (required columns, missing/duplicate questions, empty
-   options, missing/invalid correct answers, invalid difficulty/marks,
-   extra columns ignored safely). The real POST /api/trainer/assessments/validate-excel
-   endpoint must re-run every one of these checks server-side — this
-   pass only makes the wizard usable without it. */
+/* Every check (required columns, missing/invalid difficulty, empty
+   options, invalid correct-answer references, non-positive marks,
+   unknown sections) runs server-side in
+   POST /api/trainer/quizzes/bulk-upload-validate (quiz_module.py) — this
+   function only uploads the file and displays whatever the backend
+   returns. No parsing or validation happens in the browser. */
 async function validateBulkUpload(){
   if(!qzBulkFile){ showBulkError('Please choose a file first.'); return; }
   const btn = document.getElementById('qzValidateBtn');
   btn.disabled = true; btn.textContent = 'Validating…';
   document.getElementById('qzBulkError').style.display = 'none';
 
+  const form = new FormData();
+  form.append('file', qzBulkFile);
+  let res;
   try{
-    const buf = await qzBulkFile.arrayBuffer();
-    const wb = XLSX.read(buf, { type:'array' });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
-    qzBulkParsedRows = rows;
-
-    if(!rows.length){ showBulkError('The uploaded file has no data rows.'); btn.disabled=false; btn.textContent='Validate Upload'; return; }
-
-    const REQUIRED = ['Question','Option A','Option B','Option C','Option D','Correct Answer(s)','Difficulty','Marks','Type','Section'];
-    const norm = s => String(s).trim().toLowerCase();
-    const headerKeys = Object.keys(rows[0]);
-    const missingCols = REQUIRED.filter(rc => !headerKeys.some(h => norm(h)===norm(rc)));
-    if(missingCols.length){
-      showBulkError(`Missing required column${missingCols.length>1?'s':''}: ${missingCols.join(', ')}`);
-      btn.disabled=false; btn.textContent='Validate Upload';
-      return;
-    }
-    const val = (row, name) => { const k = Object.keys(row).find(h=>norm(h)===norm(name)); return k ? row[k] : ''; };
-    const TYPE_MAP = { 'single choice':'single_choice', 'multiple choice':'multiple_choice', 'true/false':'single_choice' };
-
-    const errors = []; const validRows = []; const seenQ = new Set();
-    rows.forEach((row, idx) => {
-      const excelRow = idx + 2; // header occupies row 1
-      const q = String(val(row,'Question')||'').trim();
-      const optA = String(val(row,'Option A')||'').trim();
-      const optB = String(val(row,'Option B')||'').trim();
-      const optC = String(val(row,'Option C')||'').trim();
-      const optD = String(val(row,'Option D')||'').trim();
-      const correctRaw = String(val(row,'Correct Answer(s)')||'').trim();
-      const difficulty = String(val(row,'Difficulty')||'').trim();
-      const marksRaw = val(row,'Marks');
-      const typeRaw = String(val(row,'Type')||'').trim();
-      const section = String(val(row,'Section')||'').trim();
-      const explanation = String(val(row,'Explanation')||'').trim();
-
-      const issues = [];
-      if(!q) issues.push('Missing question text');
-      if(q && seenQ.has(q.toLowerCase())) issues.push('Duplicate question');
-      if(q) seenQ.add(q.toLowerCase());
-      if(!optA || !optB) issues.push('Missing option(s) — Option A and Option B are required');
-
-      const optionMap = { A:optA, B:optB, C:optC, D:optD };
-      let correctLetters = [];
-      if(!correctRaw){
-        issues.push('Missing correct answer(s)');
-      } else {
-        correctLetters = correctRaw.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
-        const invalidLetters = correctLetters.filter(l=>!['A','B','C','D'].includes(l));
-        if(invalidLetters.length) issues.push(`Invalid correct answer(s): ${invalidLetters.join(', ')}`);
-        const emptyRefs = correctLetters.filter(l=>['A','B','C','D'].includes(l) && !optionMap[l]);
-        if(emptyRefs.length) issues.push(`Correct answer references empty option: ${emptyRefs.join(', ')}`);
-      }
-      if(!difficulty || !['easy','medium','hard'].includes(difficulty.toLowerCase())) issues.push('Invalid or missing difficulty (must be Easy, Medium or Hard)');
-      const marksNum = parseFloat(marksRaw);
-      if(marksRaw==='' || marksRaw==null || isNaN(marksNum) || marksNum<=0) issues.push('Invalid or missing marks');
-
-      const validSectionNames = qzSections.map(s=>s.name);
-      if(!section) issues.push('Missing Section');
-      else if(validSectionNames.length && !validSectionNames.some(s=>s.toLowerCase()===section.toLowerCase())) issues.push(`Invalid Section "${section}" — must be one of: ${validSectionNames.join(', ')}`);
-
-      // Issue 4: Type is mandatory and must match the number of correct answers.
-      const normalizedType = TYPE_MAP[typeRaw.toLowerCase()];
-      if(!typeRaw){ issues.push('Missing Type'); }
-      else if(!normalizedType){ issues.push(`Invalid Type "${typeRaw}" — must be Single Choice or Multiple Choice`); }
-      else if(correctLetters.length){
-        if(normalizedType==='single_choice' && correctLetters.length>1){
-          issues.push(`Type mismatch — Single Choice allows exactly one correct answer, found ${correctLetters.length}`);
-        }
-      }
-
-      if(issues.length){
-        issues.forEach(message => errors.push({ row: excelRow, message }));
-      } else {
-        validRows.push({
-          text: q, options:[optA,optB,optC,optD],
-          correct: correctLetters.map(l=>['A','B','C','D'].indexOf(l)),
-          type: normalizedType,
-          difficulty: difficulty.charAt(0).toUpperCase()+difficulty.slice(1).toLowerCase(),
-          marks: marksNum, section, explanation,
-        });
-      }
-    });
-
-    // Cross-check the uploaded pool against Section Distribution minimums —
-    // each configured section must have at least as many uploaded questions
-    // as its required count, since that many will be drawn per student.
-    if(qzSections.length && sectionDistTotal() > 0){
-      const countBySection = {};
-      validRows.forEach(r => { const key = (r.section||'').toLowerCase(); countBySection[key] = (countBySection[key]||0)+1; });
-      qzSections.forEach(s => {
-        const required = qzSectionCounts[s.id] || 0;
-        const uploaded = countBySection[s.name.toLowerCase()] || 0;
-        if(required > 0 && uploaded < required){
-          errors.push({ row: 'Section Distribution', message: `${s.name} section requires at least ${required} question(s) but only ${uploaded} were uploaded.` });
-        }
-      });
-    }
-
-    qzBulkErrors = errors; qzBulkValidRows = validRows; qzBulkValidated = true;
-    syncQuestionsAvailable();   // Requirement 1: Available = valid questions detected in the Excel; Requirement 3: category counts refresh with it
-    renderBulkValidationSummary(rows.length);
+    const raw = await fetch(PLATFORM_API + '/admin/quizzes/bulk-upload-validate', { method:'POST', credentials:'include', body: form });
+    const data = await raw.json().catch(()=>({}));
+    res = { ok: raw.ok, data };
   }catch(e){
-    showBulkError('Could not read this file — make sure it is a valid .xlsx or .xls workbook.');
+    res = { ok:false, data:{ message:'Could not reach the server. Check your connection and try again.' } };
   }
+
+  if(!res.ok){
+    showBulkError(res.data.message || 'Could not validate this file.');
+    qzBulkValidated = false;
+    btn.disabled = false; btn.textContent = 'Validate Upload';
+    updateFooterLabels();
+    return;
+  }
+
+  qzBulkQuestions = res.data.questions || [];
+  qzBulkErrors = res.data.errors || [];
+  qzBulkSectionSummary = res.data.sectionSummary || {};
+  qzBulkValidated = true;
+
+  // Auto-populate every section's Available (Hard/Medium/Easy) fields from
+  // what the backend actually found in the file — the admin only sets
+  // Display counts from here (spec: "administrator only enters ... Questions
+  // to Display / Hard / Medium / Easy Display").
+  qzSections.forEach(s => {
+    const summary = qzBulkSectionSummary[s.name] || { hard:0, medium:0, easy:0 };
+    const cfg = qzSectionConfig[s.name] || (qzSectionConfig[s.name] = blankSectionConfig());
+    cfg.hardAvailable = summary.hard || 0;
+    cfg.mediumAvailable = summary.medium || 0;
+    cfg.easyAvailable = summary.easy || 0;
+  });
+  renderSectionDistribution();
+  renderImportedQuestionCounts();
+  renderBulkValidationSummary(res.data.totalRows || (qzBulkQuestions.length + qzBulkErrors.length));
+
   btn.disabled = false; btn.textContent = 'Validate Upload';
   updateFooterLabels();
 }
+/* Total / Easy / Medium / Hard counts of the questions actually imported —
+   shown immediately once validation returns, right under the upload
+   control, before the admin even opens the Section Distribution grid. */
+function renderImportedQuestionCounts(){
+  const wrap = document.getElementById('qzBulkImportedWrap');
+  if(!qzBulkQuestions.length){ wrap.style.display = 'none'; return; }
+  const counts = { easy:0, medium:0, hard:0 };
+  qzBulkQuestions.forEach(q => {
+    const d = String(q.difficulty||'').toLowerCase();
+    if(d==='easy') counts.easy++;
+    else if(d==='medium') counts.medium++;
+    else if(d==='hard') counts.hard++;
+  });
+  wrap.style.display = '';
+  document.getElementById('qzBulkImportedStats').innerHTML = `
+    <div class="val-stat"><strong>${qzBulkQuestions.length}</strong><span>Total Imported</span></div>
+    <div class="val-stat v-valid"><strong>${counts.easy}</strong><span>Easy</span></div>
+    <div class="val-stat"><strong>${counts.medium}</strong><span>Medium</span></div>
+    <div class="val-stat v-invalid"><strong>${counts.hard}</strong><span>Hard</span></div>`;
+}
 function renderBulkValidationSummary(totalRows){
-  const invalidRowNums = new Set(qzBulkErrors.map(e=>e.row));
-  const invalidCount = invalidRowNums.size;
-  const validCount = totalRows - invalidCount;
+  const validCount = qzBulkQuestions.length;
+  const invalidCount = qzBulkErrors.length;
   document.getElementById('qzBulkSummaryWrap').style.display = '';
   document.getElementById('qzBulkValSummary').innerHTML = `
-    <div class="val-stat"><strong>${totalRows}</strong><span>Questions Uploaded</span></div>
+    <div class="val-stat"><strong>${totalRows}</strong><span>Rows Read</span></div>
     <div class="val-stat v-valid"><strong>${validCount}</strong><span>Valid</span></div>
-    <div class="val-stat v-invalid"><strong>${invalidCount}</strong><span>Invalid</span></div>
-    <div class="val-stat v-dup"><strong>${qzBulkErrors.filter(e=>e.message==='Duplicate question').length}</strong><span>Duplicates</span></div>`;
+    <div class="val-stat v-invalid"><strong>${invalidCount}</strong><span>Invalid</span></div>`;
   const errWrap = document.getElementById('qzBulkErrorWrap');
   if(qzBulkErrors.length){
     errWrap.style.display = '';
-    document.getElementById('qzBulkErrorTbody').innerHTML = qzBulkErrors.slice().sort((a,b)=>a.row-b.row)
-      .map(e=>`<tr><td>Row ${e.row}</td><td class="err-msg">${escAttr(e.message)}</td></tr>`).join('');
+    // Sheet name shown alongside Row (Part 1: bulk workbooks can now have
+    // multiple sheets), sorted by sheet then row.
+    document.getElementById('qzBulkErrorTbody').innerHTML = qzBulkErrors.slice()
+      .sort((a,b)=> String(a.sheet||'').localeCompare(String(b.sheet||'')) || a.row-b.row)
+      .map(e=>`<tr><td>${escAttr(e.sheet||'—')}</td><td>Row ${e.row}</td><td class="err-msg">${escAttr(e.issue)}</td></tr>`).join('');
     showBulkError('Fix the errors below, re-upload the corrected file, then validate again before continuing.');
   } else {
     errWrap.style.display = 'none';
@@ -4844,53 +5009,79 @@ function renderBulkValidationSummary(totalRows){
 }
 function downloadValidationReport(){
   if(!qzBulkErrors.length){ showToast('No errors to report — validation passed.'); return; }
-  const rows = [['Row','Issue'], ...qzBulkErrors.slice().sort((a,b)=>a.row-b.row).map(e=>[e.row, e.message])];
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Validation Report');
-  XLSX.writeFile(wb, 'Validation Report.xlsx');
+  const rows = ['Sheet,Row,Issue', ...qzBulkErrors.slice()
+    .sort((a,b)=> String(a.sheet||'').localeCompare(String(b.sheet||'')) || a.row-b.row)
+    .map(e=>`"${String(e.sheet||'').replace(/"/g,'""')}",${e.row},"${String(e.issue).replace(/"/g,'""')}"`)].join('\n');
+  const blob = new Blob([rows], { type:'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'validation_report.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /* ---------------------------------------------------------------- Step 3: Review & Publish ---------------------------------------------------------------- */
-function getPoolForReview(){ return getQuizType()==='manual' ? qzQuestions : qzBulkValidRows; }
+function getPoolForReview(){ const t = getQuizType(); return t==='manual' ? qzQuestions : (t==='question_bank' ? [] : qzBulkQuestions); }
 function renderReview(){
   const d = collectStep1();
   const pool = getPoolForReview();
-  const targetCount = d.available;
-  const diffCounts = { Easy:0, Medium:0, Hard:0 };
-  pool.forEach(q => { if(q.difficulty && diffCounts.hasOwnProperty(q.difficulty)) diffCounts[q.difficulty]++; });
-  const sectionRows = qzSections.map(s => `<div class="review-item"><div class="ri-label">${escAttr(s.name)}</div><div class="ri-value">${qzSectionCounts[s.id]||0}</div></div>`).join('');
+  const isBank = getQuizType()==='question_bank';
+  const { available, display } = sectionConfigTotals();
+  const diffCounts = { Hard:0, Medium:0, Easy:0 };
+  Object.values(qzSectionConfig).forEach(cfg => {
+    diffCounts.Hard += cfg.hardDisplay; diffCounts.Medium += cfg.mediumDisplay; diffCounts.Easy += cfg.easyDisplay;
+  });
+  const sectionRows = qzSections.map(s => {
+    const cfg = qzSectionConfig[s.name] || blankSectionConfig();
+    return `<div class="review-item"><div class="ri-label">${escAttr(s.name)}</div><div class="ri-value">H ${cfg.hardDisplay} · M ${cfg.mediumDisplay} · E ${cfg.easyDisplay} (of ${cfg.hardAvailable+cfg.mediumAvailable+cfg.easyAvailable} avail.)</div></div>`;
+  }).join('');
 
   document.getElementById('qzReview').innerHTML = `
     <div class="review-grid">
       <div class="review-item"><div class="ri-label">Assessment Name</div><div class="ri-value">${escAttr(d.name)}</div></div>
       <div class="review-item"><div class="ri-label">Applicable Cohort</div><div class="ri-value">${cohortTargetLabel(d.cohort)}</div></div>
       <div class="review-item"><div class="ri-label">Applicable Colleges</div><div class="ri-value">${d.collegeNames.length} selected</div></div>
-      <div class="review-item"><div class="ri-label">Questions Uploaded</div><div class="ri-value">${pool.length} / ${targetCount}</div></div>
-      <div class="review-item"><div class="ri-label">Questions Displayed</div><div class="ri-value">${d.displayed}</div></div>
+      <div class="review-item"><div class="ri-label">Questions Available</div><div class="ri-value">${isBank ? `${available} in Question Bank` : `${pool.length} / ${available}`}</div></div>
+      <div class="review-item"><div class="ri-label">Questions to Display</div><div class="ri-value">${display}</div></div>
       <div class="review-item"><div class="ri-label">Duration</div><div class="ri-value">${d.duration} min</div></div>
       <div class="review-item"><div class="ri-label">Start Date</div><div class="ri-value">${d.start ? new Date(d.start).toLocaleString() : '—'}</div></div>
       <div class="review-item"><div class="ri-label">End Date</div><div class="ri-value">${d.end ? new Date(d.end).toLocaleString() : '—'}</div></div>
     </div>
-    <div class="section-title">Section Distribution <span style="font-weight:500;text-transform:none;letter-spacing:0;">(of ${d.displayed} displayed)</span></div>
+    <div class="section-title">Section Distribution</div>
     <div class="review-grid">${sectionRows || '<p style="color:var(--text-soft);font-size:13px;">No sections configured.</p>'}</div>
-    <div class="section-title">Difficulty Summary</div>
+    <div class="section-title">Difficulty Distribution <span style="font-weight:500;text-transform:none;letter-spacing:0;">(to display)</span></div>
     <div class="review-grid">
-      <div class="review-item"><div class="ri-label">Easy</div><div class="ri-value">${diffCounts.Easy}</div></div>
-      <div class="review-item"><div class="ri-label">Medium</div><div class="ri-value">${diffCounts.Medium}</div></div>
       <div class="review-item"><div class="ri-label">Hard</div><div class="ri-value">${diffCounts.Hard}</div></div>
+      <div class="review-item"><div class="ri-label">Medium</div><div class="ri-value">${diffCounts.Medium}</div></div>
+      <div class="review-item"><div class="ri-label">Easy</div><div class="ri-value">${diffCounts.Easy}</div></div>
     </div>
     <p style="font-size:12px;color:var(--text-soft);margin-bottom:4px;">Colleges: ${d.collegeNames.join(', ') || '—'}</p>`;
 
   const letters = ['A','B','C','D'];
-  document.getElementById('qzReviewQuestions').innerHTML = pool.slice(0,3).map((q,i) => `
+  document.getElementById('qzReviewQuestions').innerHTML = isBank
+    ? '<p style="color:var(--text-soft);font-size:13px;">Question Bank mode: the actual question set is drawn fresh, at random, from the shared bank the moment you publish — so there is nothing to preview here yet.</p>'
+    : (pool.slice(0,3).map((q,i) => `
     <div class="review-qcard">
-      <div class="rq-num">Question ${i+1}${q.section?` · ${escAttr(q.section)}`:''} · ${q.type==='single_choice'?'Single Choice':'Multiple Choice'}</div>
+      <div class="rq-num">Question ${i+1}${q.section?` · ${escAttr(q.section)}`:''}${q.difficulty?` · ${escAttr(q.difficulty)}`:''} · ${q.type==='single_choice'?'Single Choice':'Multiple Choice'}</div>
       <div>${escAttr(q.text)}</div>
       <ul>${(q.options||[]).map((o,oi)=> o ? `<li class="${(q.correct||[]).includes(oi)?'correct':''}">${letters[oi]}. ${escAttr(o)}</li>` : '').join('')}</ul>
-    </div>`).join('') || '<p style="color:var(--text-soft);font-size:13px;">No questions to preview yet.</p>';
+    </div>`).join('') || '<p style="color:var(--text-soft);font-size:13px;">No questions to preview yet.</p>');
 }
+/* sectionConfig is sent verbatim to quiz_module.validate_section_config() —
+   the backend re-derives Questions Available/Displayed and the flat
+   section/difficulty distributions from it, and re-validates every number
+   against the actual question pool. Nothing here is trusted as final. */
 function buildAssessmentPayload(d, pool, status){
+  const sectionConfig = {};
+  qzSections.forEach(s => {
+    const cfg = qzSectionConfig[s.name] || blankSectionConfig();
+    sectionConfig[s.name] = {
+      hardAvailable: cfg.hardAvailable, mediumAvailable: cfg.mediumAvailable, easyAvailable: cfg.easyAvailable,
+      hardDisplay: cfg.hardDisplay, mediumDisplay: cfg.mediumDisplay, easyDisplay: cfg.easyDisplay,
+      questionsAvailable: cfg.hardAvailable + cfg.mediumAvailable + cfg.easyAvailable,
+      questionsToDisplay: cfg.hardDisplay + cfg.mediumDisplay + cfg.easyDisplay,
+    };
+  });
   return {
     assessment_name: d.name,
     assessment_type: d.quizType,
@@ -4899,12 +5090,8 @@ function buildAssessmentPayload(d, pool, status){
     start_datetime: d.start,
     end_datetime: d.end,
     duration: d.duration,
-    questions_available: d.available,
-    questions_displayed: d.displayed,
-    difficulty_distribution: { easy: d.easy, medium: d.medium, hard: d.hard },
-    section_distribution: qzSections.map(s => ({ section: s.name, count: qzSectionCounts[s.id]||0 })),
     status,
-    /* every question stores type, section, difficulty and marks. */
+    sectionConfig,
     question_pool: pool.map(q => ({
       text: q.text, options: q.options, correct: q.correct,
       type: q.type || 'single_choice',
@@ -4915,7 +5102,7 @@ function buildAssessmentPayload(d, pool, status){
 }
 function buildDraftPayload(){
   const d = collectStep1();
-  const payload = buildAssessmentPayload(d, getQuizType()==='manual' ? qzQuestions : qzBulkValidRows, 'draft');
+  const payload = buildAssessmentPayload(d, getPoolForReview(), 'draft');
   if(qzEditingId) payload.id = qzEditingId;
   else if(qzDraftId) payload.id = qzDraftId;
   return payload;
@@ -4928,66 +5115,77 @@ async function saveQuizDraft(){
   const res = await platformApiPut('/admin/quizzes/draft', buildDraftPayload());
   if(res.ok && res.data.id && !qzEditingId) qzDraftId = res.data.id;
   btn.disabled = false; btn.textContent = original;
-  showToast(res.ok ? 'Draft saved' : (res.data.message || 'Could not save draft.'));
+  showToast(res.ok ? 'Draft saved' : 'Draft saved locally — will sync once the server is reachable', !res.ok);
   if(res.ok){ await loadQuizzes(); renderPage(); }
 }
 async function publishQuiz(){
   const errEl = document.getElementById('qzStep3Error');
-  const fail = (msg)=>{ errEl.textContent = msg; errEl.style.display=''; };
+  // PART 3: never silently fail — when the backend returns a full
+  // `errors` array, show every problem at once instead of just the
+  // first/truncated one.
+  const fail = (msg, errorsList)=>{
+    if(Array.isArray(errorsList) && errorsList.length>1){
+      errEl.innerHTML = `<strong>${escAttr(msg||'Please fix the following before publishing:')}</strong><ul style="margin:6px 0 0 18px;padding:0;">${errorsList.map(e=>`<li>${escAttr(e)}</li>`).join('')}</ul>`;
+    } else {
+      errEl.textContent = msg;
+    }
+    errEl.style.display='';
+  };
   const d = collectStep1();
   const pool = getPoolForReview();
+  const { available, display } = sectionConfigTotals();
 
-  /* Consistency checks: Section/Difficulty distribution against Questions
-     Displayed; Questions Available is auto-derived from the pool itself
-     (manual questions authored, or valid rows from the uploaded Excel) —
-     see syncQuestionsAvailable(). */
-  if(!validateSectionDistribution()) return fail('Section distribution must equal the number of questions to be displayed.');
-  if(d.easy!==null || d.medium!==null || d.hard!==null){
-    const diffSum = (d.easy||0)+(d.medium||0)+(d.hard||0);
-    if(diffSum !== d.displayed) return fail(`Difficulty distribution (${diffSum}) must equal Questions to be Displayed (${d.displayed}).`);
-  }
+  if(!validateSectionDistribution()) return fail('Fix the Section Distribution grid — Available/Display must add up per section.');
   if(d.quizType==='manual'){
-    if(!pool.length) return fail('Add at least one question before publishing.');
-    if(pool.length < d.displayed) return fail(`Questions Available (${pool.length}) cannot be less than Questions Displayed (${d.displayed}).`);
+    if(pool.length !== available) return fail(`Question count (${pool.length}) does not match total Questions Available (${available}).`);
     if(pool.some(q=>!isQuestionComplete(q))) return fail('Complete every manual question before publishing.');
-  } else {
+  } else if(d.quizType==='bulk'){
     if(!qzBulkValidated || qzBulkErrors.length>0) return fail('Resolve the Excel validation errors before publishing.');
-    if(!pool.length) return fail('Upload and validate an Excel file before publishing.');
-    if(pool.length < d.displayed) return fail(`Questions Available (${pool.length}) cannot be less than Questions Displayed (${d.displayed}).`);
+    if(pool.length !== available) return fail(`Uploaded question count (${pool.length}) does not match total Questions Available (${available}) — re-check your Section Distribution.`);
   }
+  // Question Bank mode: nothing to check client-side — Available is
+  // always the live bank count and the actual question set is drawn
+  // server-side at the moment of publish (Part 7/8).
   errEl.style.display = 'none';
 
   const btn = document.getElementById('qzNextBtn');
   btn.disabled = true; btn.textContent = 'Publishing…';
   const payload = buildAssessmentPayload(d, pool, 'published');
-  if(qzEditingId) payload.id = qzEditingId;
+  if(qzEditingId){ payload.id = qzEditingId; }
   const res = qzEditingId
     ? await platformApiPut(`/admin/quizzes/${qzEditingId}`, payload)
     : await platformApiPost('/admin/quizzes', payload);
   btn.disabled = false; btn.textContent = 'Publish Quiz';
 
-  if(!res.ok){ return fail(res.data.message || 'Could not publish this quiz. Save it as a draft and try again.'); }
+  if(!res.ok){ return fail(res.data.message || 'Could not publish this quiz. Save it as a draft and try again.', res.data.errors); }
   closeQuizModal();
   showToast(`${d.name} ${qzEditingId ? 'updated' : 'published'}`);
   resetWizard();
-  STATE.page = 'assessments';
-  STATE.tab.assessments = 'quizzes';
-  await loadQuizzes();
-  renderPage();
+  await loadQuizzes(); renderPage();
 }
 
 /* ---------------------------------------------------------------- Wizard shell: stepper, nav, reset ---------------------------------------------------------------- */
 function updateFooterLabels(){
   const nextBtn = document.getElementById('qzNextBtn');
   document.getElementById('qzSaveDraftBtn').style.display = qzCurrentStep===1 ? 'none' : '';
-  if(qzCurrentStep===1){ nextBtn.textContent = 'Next →'; nextBtn.disabled = false; }
+  if(qzCurrentStep===1){ nextBtn.textContent = 'Next →'; nextBtn.disabled = false; nextBtn.title = ''; }
   else if(qzCurrentStep===2){
-    const displayed = parseInt(document.getElementById('qzDisplayed').value) || 0;
-    const sectionsOk = qzSections.length>0 && sectionDistTotal() === displayed; // Issue 8: gate Next on section distribution
+    // PART 2 FIX: single, unambiguous label — this button only ever
+    // means "finish this step and continue to Review". Moving between
+    // individual questions is the top Prev Q/Next Q bar's job alone —
+    // there is no longer a second, conflicting navigation system here.
+    const { available, display } = sectionConfigTotals();
+    const sectionsOk = qzSections.length>0 && available>0 && display>0 && display<=available;
     nextBtn.disabled = !sectionsOk;
-    if(getQuizType()==='manual') nextBtn.textContent = (qzCurrentQIndex >= qzQuestions.length-1) ? 'Finish →' : 'Next Question →';
-    else nextBtn.textContent = 'Continue →';
-  } else { nextBtn.textContent = 'Publish Quiz'; nextBtn.disabled = false; }
+    // PART 3: never disable without explanation — always say exactly why.
+    nextBtn.title = sectionsOk ? '' : (
+      qzSections.length===0 ? 'Add assessment sections before continuing.'
+      : available===0 ? 'Configure at least one section with Available questions.'
+      : display===0 ? 'Set how many questions to Display for at least one section.'
+      : 'Total to Display cannot exceed Total Available.'
+    );
+    nextBtn.textContent = 'Continue to Review →';
+  } else { nextBtn.textContent = 'Publish Quiz'; nextBtn.disabled = false; nextBtn.title = ''; }
 }
 function updateStepperUI(){
   document.querySelectorAll('#quizModal .step').forEach(s=>{
@@ -5005,13 +5203,8 @@ async function renderStep2View(){
   document.getElementById('qzManualWrap').style.display = type==='manual' ? '' : 'none';
   document.getElementById('qzBulkWrap').style.display = type==='bulk' ? '' : 'none';
   if(type==='manual'){
-    if(!qzQuestions.length) qzQuestions.push(blankQuestion());   // seed the pool; Questions Available now tracks its length automatically
-    if(qzCurrentQIndex >= qzQuestions.length) qzCurrentQIndex = Math.max(0, qzQuestions.length-1);
-    refreshManualSectionTags();
+    buildManualQueueFromSectionConfig();
     renderCurrentQuestion();
-    syncQuestionsAvailable();
-  } else if(document.getElementById('qzSectionDistRows')){
-    renderSectionDistribution();   // reflect current category availability without forcing Available back to 0 before a (re)upload
   }
   updateFooterLabels();
 }
@@ -5025,26 +5218,43 @@ async function qzNext(){
     return;
   }
   if(qzCurrentStep===2){
-    if(!validateSectionDistribution()) return;   // Issue 8: block all Step 2 progress until section distribution matches Displayed
+    if(!validateSectionDistribution()) return;
     if(getQuizType()==='manual'){
+      // PART 2 FIX: no longer steps through individual questions (that
+      // was a second, conflicting navigation system — the top
+      // "← Prev Q / Next Q →" bar already owns that job, see
+      // goToQuestion()). This button's only job on Step 2 is "finish
+      // authoring and continue to Review", evaluated across the whole
+      // pool, not just whichever question happens to be on screen.
       autosaveCurrentQuestion(true);
-      if(qzCurrentQIndex < qzQuestions.length-1){ qzCurrentQIndex++; renderCurrentQuestion(); return; }
       const incomplete = qzQuestions.filter(q=>!isQuestionComplete(q)).length;
       const errEl = document.getElementById('qzManualError');
-      if(incomplete>0){ errEl.textContent = `${incomplete} question${incomplete===1?'':'s'} still need to be completed before continuing.`; errEl.style.display=''; return; }
-      const displayed = parseInt(document.getElementById('qzDisplayed').value) || 0;
-      if(qzQuestions.length < displayed){ errEl.textContent = `Questions Available (${qzQuestions.length}) cannot be less than Questions Displayed (${displayed}). Add more questions.`; errEl.style.display=''; return; }
+      if(incomplete>0){
+        const firstIncomplete = qzQuestions.findIndex(q=>!isQuestionComplete(q));
+        if(firstIncomplete>=0 && firstIncomplete!==qzCurrentQIndex){ qzCurrentQIndex = firstIncomplete; renderCurrentQuestion(); }
+        errEl.textContent = `${incomplete} question${incomplete===1?'':'s'} still need to be completed before continuing. Jumped to the first one.`;
+        errEl.style.display='';
+        return;
+      }
       errEl.style.display = 'none';
       enterStep3();
       return;
     }
+    if(getQuizType()==='question_bank'){
+      // Question Bank mode has no authored pool to check here — Available
+      // is always sourced live from the bank (see renderSectionDistributionPanel),
+      // so validateSectionDistribution() above already covers everything
+      // this step needs to gate on.
+      enterStep3();
+      return;
+    }
     const errEl = document.getElementById('qzBulkError');
-    if(!qzBulkValidated || qzBulkErrors.length>0 || !qzBulkValidRows.length){
+    if(!qzBulkValidated || qzBulkErrors.length>0 || !qzBulkQuestions.length){
       errEl.textContent = 'Upload and successfully validate your Excel file before continuing.'; errEl.style.display=''; return;
     }
-    const d = collectStep1();
-    if(qzBulkValidRows.length < d.displayed){
-      errEl.textContent = `Uploaded ${qzBulkValidRows.length} valid questions, but Questions Displayed is set to ${d.displayed}. Upload more questions or lower Questions Displayed.`; errEl.style.display=''; return;
+    const { available } = sectionConfigTotals();
+    if(qzBulkQuestions.length !== available){
+      errEl.textContent = `Uploaded ${qzBulkQuestions.length} valid questions, but Section Distribution totals ${available} Available. Adjust the Display counts or re-upload.`; errEl.style.display=''; return;
     }
     errEl.style.display = 'none';
     enterStep3();
@@ -5055,28 +5265,30 @@ async function qzNext(){
 async function qzPrev(){
   if(qzCurrentStep===3){ qzCurrentStep=2; updateStepperUI(); await renderStep2View(); return; }
   if(qzCurrentStep===2){
-    if(getQuizType()==='manual' && qzCurrentQIndex>0){ autosaveCurrentQuestion(true); qzCurrentQIndex--; renderCurrentQuestion(); return; }
+    // PART 2 FIX: "← Previous" always leaves Step 2 back to Step 1 now —
+    // moving between individual questions is exclusively the top
+    // "← Prev Q" button's job (goToQuestion()).
     qzCurrentStep = 1; updateStepperUI(); return;
   }
 }
 function resetWizard(){
   qzCurrentStep = 1;
   qzEditingId = null; qzDraftId = null;
-  const titleEl = document.querySelector('#quizModal .qzw-modal-head h3');
-  if(titleEl) titleEl.textContent = 'Create Quiz';
+  document.getElementById('quizModal').querySelector('.qzw-modal-head h3').textContent = 'Create Quiz';
+  document.getElementById('qzNextBtn').style.visibility = '';
   qzQuestions = []; qzCurrentQIndex = 0;
-  qzSections = []; qzSectionCounts = {};
-  qzBulkFile = null; qzBulkParsedRows = []; qzBulkValidRows = []; qzBulkErrors = []; qzBulkValidated = false;
+  qzSections = []; qzSectionConfig = {};
+  qzBulkFile = null; qzBulkQuestions = []; qzBulkErrors = []; qzBulkSectionSummary = {}; qzBulkValidated = false;
+  qzBankAvailability = {};
   qzCollegesSelected = new Set();
-  ['qzStep1Error','qzManualError','qzBulkError','qzStep3Error','qzSectionDistError','qzCategoryLimitError'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
-  ['qzName','qzStart','qzEnd','qzAvailable','qzDisplayed','qzDuration','qzEasy','qzMedium','qzHard'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  ['qzStep1Error','qzManualError','qzBulkError','qzStep3Error','qzSectionDistError'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
+  ['qzName','qzStart','qzEnd','qzDuration'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
   document.getElementById('qzCohort').value = 'all';
   document.querySelectorAll('input[name="qzType"]').forEach(r => r.checked = r.value==='manual');
   onQuizTypeChange('manual');
   const selAll = document.getElementById('qzCollegeSelectAll'); if(selAll) selAll.checked = false;
   clearBulkFile();
   updateCollegesTriggerUI();
-  updateDifficultyHint();
   updateStepperUI();
 }
 async function openQuizModal(){
@@ -5090,9 +5302,11 @@ function closeQuizModal(){
   document.getElementById('modal-root').innerHTML = '';
 }
 
-/* Opens the same wizard pre-filled with an existing quiz's data, fetched
-   fresh from the backend (never from the summarized QUIZZES row) so the
-   edit form always reflects the full, current question pool. */
+/* Opens the same wizard pre-filled with an existing quiz's data. Fetches
+   the full quiz (including its question pool) fresh from the backend so
+   the edit form is never based on stale/partial list data. Server-side
+   editing restrictions (already-started / completed) are re-checked on
+   submit regardless, but we also surface the message immediately here. */
 async function editQuiz(id){
   const res = await platformApiGet(`/admin/quizzes/${id}`);
   if(!res.ok){ showToast(res.data.message || 'Could not load this quiz.', true); return; }
@@ -5106,8 +5320,7 @@ async function editQuiz(id){
   document.getElementById('modal-root').innerHTML = quizWizardMarkup();
   resetWizard();
   qzEditingId = id;
-  const titleEl = document.querySelector('#quizModal .qzw-modal-head h3');
-  if(titleEl) titleEl.textContent = 'Edit Quiz';
+  document.getElementById('quizModal').querySelector('.qzw-modal-head h3').textContent = 'Edit Quiz';
 
   qzColleges = await getColleges();
   qzCollegesSelected = new Set(q.colleges || []);
@@ -5118,17 +5331,37 @@ async function editQuiz(id){
   document.getElementById('qzCohort').value = q.cohortTarget || 'all';
   document.getElementById('qzStart').value = isoToLocalInput(q.startDateTime);
   document.getElementById('qzEnd').value = isoToLocalInput(q.endDateTime);
-  document.getElementById('qzAvailable').value = q.questionsAvailable || (q.questions||[]).length;
-  document.getElementById('qzDisplayed').value = q.questionsDisplayed || (q.questions||[]).length;
   document.getElementById('qzDuration').value = q.durationMinutes || '';
-  const dd = q.difficultyDistribution || {};
-  document.getElementById('qzEasy').value = dd.easy != null ? dd.easy : '';
-  document.getElementById('qzMedium').value = dd.medium != null ? dd.medium : '';
-  document.getElementById('qzHard').value = dd.hard != null ? dd.hard : '';
-  updateDifficultyHint();
 
-  const type = q.quizType === 'bulk' ? 'bulk' : 'manual';
+  const type = (q.quizType === 'bulk' || q.quizType === 'question_bank') ? q.quizType : 'manual';
   document.querySelectorAll('input[name="qzType"]').forEach(r => r.checked = r.value===type);
+
+  await ensureSectionsLoaded();
+  // Pre-fill sectionConfig from the stored quiz — either the granular
+  // grid (new quizzes) or, for quizzes created before this redesign, a
+  // best-effort reconstruction from the flat sectionDistribution/
+  // difficultyDistribution/question pool so editing an old quiz doesn't
+  // start from a blank grid.
+  if(q.sectionConfig && Object.keys(q.sectionConfig).length){
+    qzSections.forEach(s => { qzSectionConfig[s.name] = Object.assign(blankSectionConfig(), q.sectionConfig[s.name] || {}); });
+  } else {
+    const byKey = {};
+    (q.questions || []).forEach(qq => {
+      const key = `${qq.section}|${(qq.difficulty||'').toLowerCase()}`;
+      byKey[key] = (byKey[key]||0) + 1;
+    });
+    const sectionDist = q.sectionDistribution || {};
+    qzSections.forEach(s => {
+      const cfg = blankSectionConfig();
+      cfg.hardAvailable = byKey[`${s.name}|hard`] || 0;
+      cfg.mediumAvailable = byKey[`${s.name}|medium`] || 0;
+      cfg.easyAvailable = byKey[`${s.name}|easy`] || 0;
+      const displayTotal = sectionDist[s.name] || 0;
+      // Best-effort even split of the legacy flat per-section Display total across difficulties.
+      cfg.hardDisplay = Math.min(cfg.hardAvailable, displayTotal);
+      qzSectionConfig[s.name] = cfg;
+    });
+  }
   onQuizTypeChange(type);
 
   qzQuestions = (q.questions || []).map(qq => ({
@@ -5137,7 +5370,6 @@ async function editQuiz(id){
     difficulty: qq.difficulty || '', marks: qq.marks != null ? qq.marks : '',
     explanation: qq.explanation || '', section: qq.section || '',
   }));
-  if(type==='manual') syncQuestionsAvailable();   // manual pool -> Available always in sync; bulk keeps the stored value until a new file is re-uploaded/validated
 }
 
 /* Read-only view of a quiz — every question, its options, the correct
@@ -5184,6 +5416,9 @@ async function toggleQuizStatus(id, currentStatus){
 }
 document.addEventListener('click', function(e){
   if(e.target && e.target.id==='quizModal') closeQuizModal();
+});
+document.addEventListener('click', function(e){
+  if(e.target && e.target.id==='qzStatsModal') closeQuizStatsModal();
 });
 
 

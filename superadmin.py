@@ -22,7 +22,7 @@ sample values):
 Only Super Admin (role="super_admin") can call these routes.
 """
 
-from flask import Blueprint, request
+from flask import Blueprint, request, send_file
 from flask_jwt_extended import get_jwt_identity
 
 from quiz_common import (
@@ -33,6 +33,8 @@ from quiz_common import (
     list_quiz_results, set_quiz_interview_marks, validate_quiz_result,
     serialize_quiz_result, RESULT_STATUS_INTERVIEW_DONE, RESULT_STATUS_VALIDATED,
     compute_quiz_analytics, list_quiz_responses,
+    list_distinct_departments, build_quiz_responses_workbook,
+    backfill_student_cohorts,
     log_activity,
 )
 from colleges import resolve_active_college, resolve_active_department
@@ -238,30 +240,65 @@ def init_superadmin(db):
     @bp.route("/quiz-responses", methods=["GET"])
     @role_required("super_admin")
     def quiz_responses():
-        """List of submitted attempts, most recent first, with student + assessment names."""
-        limit = int(request.args.get("limit", 50))
-        pipeline = [
-            {"$match": {"status": "submitted"}},
-            {"$sort": {"submittedAt": -1}},
-            {"$limit": limit},
-            {"$lookup": {"from": "users", "localField": "studentId", "foreignField": "_id", "as": "student"}},
-            {"$lookup": {"from": "assessments", "localField": "assessmentId", "foreignField": "_id", "as": "assessment"}},
-        ]
-        rows = []
-        for row in attempts.aggregate(pipeline):
-            student = row["student"][0] if row.get("student") else {}
-            assessment = row["assessment"][0] if row.get("assessment") else {}
-            rows.append({
-                "attemptId": str(row["_id"]),
-                "studentName": student.get("fullName"),
-                "studentEmail": student.get("email"),
-                "cohort": student.get("cohort") or ENTRY_LEVEL,
-                "assessmentName": assessment.get("name"),
-                "assessmentType": assessment.get("type"),
-                "overallPercentage": row.get("overall", {}).get("percentage"),
-                "submittedAt": row["submittedAt"].isoformat() if row.get("submittedAt") else None,
-            })
-        return ok({"responses": rows})
+        """Raw per-attempt rows for the Super Admin Quiz Responses table.
+
+        ROOT-CAUSE FIX: this used to run its own hand-rolled aggregation
+        against db.assessment_attempts/db.assessments (the older, largely
+        unused cohort-placement engine) with no College/Course/Cohort/
+        search filters at all — which is also why the frontend's filter
+        bar was doing its own (incorrect, unrequested) client-side
+        filtering on top of it. Now shares the exact same
+        list_quiz_responses() helper Trainer's identically-named endpoint
+        uses, just unscoped by college unless one is explicitly requested,
+        so the two dashboards can never disagree about what a "response"
+        is or how it's filtered.
+        """
+        college = request.args.get("college") or "all"
+        cohort = request.args.get("cohort") or "all"
+        quiz_id = request.args.get("quizId") or "all"
+        department = request.args.get("department") or "all"
+        search = request.args.get("search") or ""
+        return ok({"responses": list_quiz_responses(
+            db,
+            college=None if college == "all" else college,
+            cohort=cohort, quiz_id=quiz_id, department=department, search=search,
+        )})
+
+    @bp.route("/quiz-responses/filters", methods=["GET"])
+    @role_required("super_admin")
+    def quiz_responses_filters():
+        """Course/Department dropdown options for the Quiz Responses
+        filter bar — distinct values actually in use across every
+        college (or one college, if ?college= is given), read live from
+        the database, never hardcoded."""
+        college = request.args.get("college") or "all"
+        return ok({"departments": list_distinct_departments(
+            db, college=None if college == "all" else college,
+        )})
+
+    @bp.route("/quiz-responses/export", methods=["GET"])
+    @role_required("super_admin")
+    def quiz_responses_export():
+        """Backend-generated .xlsx of exactly what the Quiz Responses
+        table is currently showing — same filters, same query, same rows."""
+        college = request.args.get("college") or "all"
+        cohort = request.args.get("cohort") or "all"
+        quiz_id = request.args.get("quizId") or "all"
+        department = request.args.get("department") or "all"
+        search = request.args.get("search") or ""
+        rows = list_quiz_responses(
+            db,
+            college=None if college == "all" else college,
+            cohort=cohort, quiz_id=quiz_id, department=department, search=search,
+            limit=100000,
+        )
+        buf = build_quiz_responses_workbook(rows)
+        return send_file(
+            buf,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name="quiz_responses.xlsx",
+        )
 
     @bp.route("/quiz-analytics", methods=["GET"])
     @role_required("super_admin")
@@ -275,21 +312,37 @@ def init_superadmin(db):
         college = request.args.get("college") or "all"
         cohort = request.args.get("cohort") or "all"
         quiz_id = request.args.get("quizId") or "all"
+        department = request.args.get("department") or "all"
+        search = request.args.get("search") or ""
         return ok(compute_quiz_analytics(
             db,
             college=None if college == "all" else college,
             cohort=cohort,
             quiz_id=quiz_id,
+            department=department,
+            search=search,
         ))
 
     @bp.route("/assessments/responses", methods=["GET"])
     @role_required("super_admin")
     def assessment_responses_all():
-        """Raw per-attempt rows backing the Quiz Responses table —
-        platform-wide (no college filter), same underlying data as
-        /quiz-analytics above via the shared list_quiz_responses helper.
+        """Deprecated alias of /quiz-responses (kept for backward
+        compatibility — nothing in this codebase calls it anymore, the
+        frontend now calls /quiz-responses directly, matching Trainer's
+        endpoint name). Shares the exact same filtered helper, so even if
+        something external still calls this, it can never disagree with
+        the main table.
         """
-        return ok({"responses": list_quiz_responses(db)})
+        college = request.args.get("college") or "all"
+        cohort = request.args.get("cohort") or "all"
+        quiz_id = request.args.get("quizId") or "all"
+        department = request.args.get("department") or "all"
+        search = request.args.get("search") or ""
+        return ok({"responses": list_quiz_responses(
+            db,
+            college=None if college == "all" else college,
+            cohort=cohort, quiz_id=quiz_id, department=department, search=search,
+        )})
 
     # ==========================================================
     # MARKS MANAGEMENT — Create-Quiz results, Interview Verification,
@@ -301,12 +354,21 @@ def init_superadmin(db):
     @bp.route("/quiz-results", methods=["GET"])
     @role_required("super_admin")
     def quiz_results_all():
-        return ok({"results": list_quiz_results(db)})
+        """`search` matches Student Name / Roll Number / Register Number,
+        resolved entirely by the database (see
+        quiz_common._student_search_query) — same matching rules Trainer's
+        identically-named endpoint uses."""
+        search = request.args.get("search") or ""
+        return ok({"results": list_quiz_results(db, search=search)})
 
     @bp.route("/quiz-interview-verification", methods=["GET"])
     @role_required("super_admin")
     def quiz_interview_verification_all():
-        return ok({"results": list_quiz_results(db)})
+        """`search` matches Assessment Name / Student Name / Roll Number /
+        College / Department, resolved entirely by the database (see
+        quiz_common._verification_search_query)."""
+        search = request.args.get("search") or ""
+        return ok({"results": list_quiz_results(db, search=search, broad_search=True)})
 
     @bp.route("/quiz-interview-verification/<attempt_id>/marks", methods=["POST"])
     @role_required("super_admin")
@@ -331,8 +393,10 @@ def init_superadmin(db):
     @bp.route("/quiz-validation-verification", methods=["GET"])
     @role_required("super_admin")
     def quiz_validation_verification_all():
+        search = request.args.get("search") or ""
         return ok({"results": list_quiz_results(
             db, statuses=[RESULT_STATUS_INTERVIEW_DONE, RESULT_STATUS_VALIDATED],
+            search=search, broad_search=True,
         )})
 
     @bp.route("/quiz-validation-verification/<attempt_id>/validate", methods=["POST"])
@@ -420,6 +484,35 @@ def init_superadmin(db):
 
         return ok({"placementRules": serialize(updated), "recalculatedStudents": recalculated},
                    message="Placement rules updated.")
+
+    @bp.route("/student-cohort/backfill", methods=["POST"])
+    @role_required("super_admin")
+    def student_cohort_backfill():
+        """
+        Cohort-mapping bug fix, Part 5 ("Synchronize Existing Data"): run
+        this once after deploying the cohort-mapping fix to retroactively
+        correct any student whose Create-Quiz result was Validated
+        BEFORE that fix existed — their db.users.cohort (the field every
+        quiz-eligibility check reads) never moved, even though their own
+        Quiz History page correctly showed their assigned cohort all
+        along. Also backfills db.student_cohort for anyone whose cohort
+        was already correct but predates that collection.
+
+        Safe to re-run any number of times — see
+        quiz_common.backfill_student_cohorts()'s docstring for exactly
+        why nothing here can regress an already-correct student.
+        """
+        result = backfill_student_cohorts(db)
+        log_activity(
+            db, get_jwt_identity(), "super_admin", "student_cohort_backfill",
+            f"Ran cohort backfill — {result['promoted']} student(s) corrected, "
+            f"{result['mirroredOnly']} mirrored into StudentCohort, "
+            f"{result['checked']} candidate(s) checked.",
+        )
+        return ok(result, message=(
+            f"Backfill complete — {result['promoted']} student(s) had their cohort corrected, "
+            f"{result['mirroredOnly']} more were mirrored into the StudentCohort collection."
+        ))
 
     # ==========================================================
     # 5. DYNAMIC CHARTS — Skill Radar, Category %, Overall, Trends

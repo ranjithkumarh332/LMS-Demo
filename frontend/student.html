@@ -495,6 +495,15 @@ tbody tr:hover{ background:var(--paper); }
 ============================================================ */
 .exam-overlay{ position:fixed; inset:0; background:var(--paper); z-index:900; display:none; flex-direction:column; }
 .exam-overlay.active{ display:flex; }
+/* Task 7: Dedicated Exam Mode — while an assessment/quiz is open, the
+   sidebar, topbar and rest of the dashboard chrome are removed from
+   layout entirely (not just visually covered by the overlay), so only
+   the exam interface exists on the page. */
+body.exam-mode-active .sidebar,
+body.exam-mode-active .topbar,
+body.exam-mode-active .sidebar-overlay{ display:none !important; }
+body.exam-mode-active .main-wrap{ margin-left:0 !important; }
+body.exam-mode-active{ overflow:hidden; }
 .exam-topbar{ display:flex; align-items:center; justify-content:space-between; padding:16px 26px; border-bottom:1px solid var(--line); background:var(--paper-raised); gap:16px; flex-wrap:wrap; }
 .exam-title{ font-size:15px; font-weight:700; }
 .exam-timer{ font-family:var(--font-mono); font-size:20px; font-weight:700; padding:8px 18px; border-radius:100px; background:var(--paper); border:1.5px solid var(--line); }
@@ -890,7 +899,6 @@ tbody tr:hover{ background:var(--paper); }
     <div class="tab" data-tab="assess-live">Live</div>
     <div class="tab" data-tab="assess-scheduled">Scheduled</div>
     <div class="tab" data-tab="assess-attempted">Attempted</div>
-    <div class="tab" data-tab="assess-completed">Completed</div>
   </div>
 
   <div class="grid grid-2" id="assessmentCards">
@@ -938,12 +946,12 @@ tbody tr:hover{ background:var(--paper); }
         <div class="exam-options" id="examOptions"></div>
         <div class="exam-actions-row">
           <div class="exam-actions-left">
-            <button class="btn btn-ghost btn-sm" onclick="examNav(-1)">← Previous</button>
+            <button class="btn btn-ghost btn-sm" id="examPrevBtn" onclick="examNav(-1)">← Previous</button>
             <button class="btn btn-ghost btn-sm" onclick="markForReview()">🚩 Mark for Review</button>
             <button class="btn btn-ghost btn-sm" onclick="clearAnswer()">Clear Answer</button>
           </div>
           <div class="exam-actions-right">
-            <button class="btn btn-teal btn-sm" onclick="examNav(1)">Next →</button>
+            <button class="btn btn-teal btn-sm" id="examNextBtn" onclick="examNav(1)">Next →</button>
             <button class="btn btn-danger btn-sm" onclick="confirmSubmitExam()">Submit Assessment</button>
           </div>
         </div>
@@ -972,6 +980,20 @@ tbody tr:hover{ background:var(--paper); }
       <p>Cohorts group students by the dimension that needs the most attention, so every workshop you're assigned closes a real gap.</p>
     </div>
   </div>
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-head"><h3>Overall Performance</h3><span class="card-sub">Across every validated assessment</span></div>
+    <div class="grid grid-2" style="gap:16px;">
+      <div class="kpi-card">
+        <div class="kpi-label">Overall Percentage</div>
+        <div class="kpi-value" id="cohortOverallScoreValue">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Overall Cohort</div>
+        <div class="kpi-value" id="cohortOverallCohortValue">—</div>
+      </div>
+    </div>
+  </div>
+
   <div class="grid grid-2" style="align-items:start;">
     <div class="card">
       <div class="card-head"><h3>Current Cohort</h3><span class="badge badge-amber" id="cohortBadge">—</span></div>
@@ -1175,9 +1197,9 @@ tbody tr:hover{ background:var(--paper); }
   <div class="card">
     <div class="card-head"><h3>Recent Assessments</h3></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Quiz</th><th>Date</th><th>Score</th><th>Interview Marks</th><th>Final Average</th><th>Cohort</th><th>Status</th></tr></thead>
+      <thead><tr><th>Quiz</th><th>Date</th><th>Score</th><th>Time Taken</th><th>Interview Marks</th><th>Final Average</th><th>Cohort</th><th>Status</th></tr></thead>
       <tbody id="quizHistoryBody">
-        <tr><td colspan="7" class="cell-sub">Loading quiz history…</td></tr>
+        <tr><td colspan="8" class="cell-sub">Loading quiz history…</td></tr>
       </tbody>
     </table></div>
   </div>
@@ -1716,7 +1738,7 @@ async function loadQuizHistory(){
   const kpiGrid = document.getElementById('quizHistoryKpiGrid');
   const body = document.getElementById('quizHistoryBody');
   if (!ok || !data){
-    body.innerHTML = '<tr><td colspan="7" class="cell-sub">Could not load quiz history.</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="cell-sub">Could not load quiz history.</td></tr>';
     return;
   }
   const s = data.stats || {};
@@ -1746,9 +1768,13 @@ async function loadQuizHistory(){
         const cohortCell = r && r.cohort ? `<span class="badge badge-ink">${r.cohort}</span>` : '—';
         const statusLabel = r ? r.status : q.status;
         const statusCls = r ? (statusBadgeClass[r.status] || 'badge-ink') : (q.status === 'Completed' ? 'badge-teal' : q.status === 'In Progress' ? 'badge-amber' : 'badge-ink');
-        return `<tr><td class="cell-strong">${q.name}</td><td>${q.date ? fmtDate(q.date) : (q.dateLabel || '—')}</td><td>${q.score != null ? q.score+'%' : '—'}</td><td>${interviewCell}</td><td>${avgCell}</td><td>${cohortCell}</td><td><span class="badge ${statusCls}">${statusLabel}</span></td></tr>`;
+        // Part 4/9 — "Completed in XX Minutes": timeTakenSeconds is
+        // computed once at submission (submittedAt - startedAt) and
+        // stored permanently on the attempt; never re-derived here.
+        const timeTakenCell = fmtMinutesTaken(q.timeTakenSeconds) || '—';
+        return `<tr><td class="cell-strong">${q.name}</td><td>${q.date ? fmtDate(q.date) : (q.dateLabel || '—')}</td><td>${q.score != null ? q.score+'%' : '—'}</td><td>${timeTakenCell}</td><td>${interviewCell}</td><td>${avgCell}</td><td>${cohortCell}</td><td><span class="badge ${statusCls}">${statusLabel}</span></td></tr>`;
       }).join('')
-    : '<tr><td colspan="7" class="cell-sub">No recent assessments available.</td></tr>';
+    : '<tr><td colspan="8" class="cell-sub">No recent assessments available.</td></tr>';
 }
 
 /* ============================================================
@@ -1764,11 +1790,19 @@ async function loadCohortPage(){
   const outcomeText = document.getElementById('cohortOutcomeText');
   const progressBar = document.getElementById('cohortProgressBar');
   const progressValue = document.getElementById('cohortProgressValue');
+  const overallScoreEl = document.getElementById('cohortOverallScoreValue');
+  const overallCohortEl = document.getElementById('cohortOverallCohortValue');
 
   if (!ok || !data){
     reasonText.textContent = 'Could not load your cohort details right now.';
     return;
   }
+
+  // Task 4: Overall Percentage + Overall Cohort card — backend-computed,
+  // same values shown on Dashboard Home and Placement Readiness.
+  overallScoreEl.textContent = data.overallScore != null ? `${data.overallScore}%` : '—';
+  overallCohortEl.textContent = data.overallCohortLabel || '—';
+
   badge.textContent = data.cohortLabel || (data.cohort === 'entry_level' ? 'Entry Level' : `Cohort ${data.cohort}`) || '—';
   reasonText.textContent = data.reason || 'Your cohort reflects the dimension needing the most attention right now.';
 
@@ -1944,6 +1978,7 @@ async function loadRankings(){
    so the student has a single place to see and start everything.
 ============================================================ */
 let assessmentsFilter = 'all';
+let assessmentsSearchTerm = '';
 let assessmentBuckets = { live:[], scheduled:[], attempted:[], completed:[] };
 
 async function loadAssessments(){
@@ -1969,6 +2004,12 @@ async function loadAssessments(){
 }
 
 function fmtDate(iso){ return iso ? new Date(iso).toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'}) : ''; }
+function fmtTime(iso){ return iso ? new Date(iso).toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true}) : ''; }
+function fmtMinutesTaken(seconds){
+  if(seconds == null) return null;
+  const mins = Math.max(1, Math.round(seconds / 60));
+  return `${mins} Minute${mins===1?'':'s'}`;
+}
 
 function unifiedCardHTML(item, bucket){
   if (item.kind === 'quiz') return quizCardHTML(item, bucket);
@@ -2005,7 +2046,7 @@ function assessmentCardHTML(a, bucket){
 
 function quizCardHTML(q){
   const badgeMap = {
-    scheduled: ['badge-amber', q.startDateTime ? `Starts ${fmtDate(q.startDateTime)}` : 'Scheduled'],
+    scheduled: ['badge-amber', 'Upcoming'],
     live: ['badge-teal', 'Live'],
     attempted: ['badge-ink', 'Attempted'],
     completed: ['badge-ink', 'Completed'],
@@ -2013,17 +2054,33 @@ function quizCardHTML(q){
     archived: ['badge-ink', 'Archived'],
   };
   const [badgeCls, badgeText] = badgeMap[q.status] || ['badge-ink', q.status || ''];
-  const metaBits = [
-    `${q.questionsDisplayed ?? q.questionsAvailable ?? 0} questions`,
-    q.durationMinutes ? `${q.durationMinutes} min` : null,
-    q.totalMarks ? `${q.totalMarks} marks` : null,
-    q.cohortTarget === 'entry_level' ? 'Entry Level' : (q.cohortTarget && q.cohortTarget !== 'all' ? `Cohort ${q.cohortTarget}` : null),
-  ].filter(Boolean).join(' · ');
+  const cohortLabel = q.cohortTarget === 'entry_level' ? 'Entry Level' : (q.cohortTarget && q.cohortTarget !== 'all' ? `Cohort ${q.cohortTarget}` : 'All Cohorts');
+
+  // Part 3/9 — full card detail: Assessment Name, Applicable Cohort,
+  // Start Date/Time, End Date/Time, Duration, Questions, Status — each
+  // its own labeled field rather than one condensed line.
+  const metaRows = [
+    ['Cohort', cohortLabel],
+    ['Starts', q.startDateTime ? `${fmtDate(q.startDateTime)} · ${fmtTime(q.startDateTime)}` : '—'],
+    ['Ends', q.endDateTime ? `${fmtDate(q.endDateTime)} · ${fmtTime(q.endDateTime)}` : '—'],
+    ['Duration', q.durationMinutes ? `${q.durationMinutes} Minutes` : '—'],
+    ['Questions', q.questionsDisplayed ?? q.questionsAvailable ?? 0],
+  ];
+  const metaGrid = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;margin-bottom:14px;">
+    ${metaRows.map(([label,val]) => `<div><div class="cell-sub" style="margin-bottom:2px;">${label}</div><div style="font-size:13px;font-weight:600;">${val}</div></div>`).join('')}
+  </div>`;
 
   let actions;
   if (q.status === 'attempted'){
+    // Part 4/9 — "Completed in XX Minutes" replaces the Start Quiz
+    // button, computed from the stored startedAt/submittedAt timestamps
+    // (timeTakenSeconds), never re-derived on the frontend.
     const pct = q.result && q.result.percentage != null ? `${q.result.percentage}%` : '—';
-    actions = `<span class="cell-sub">Score: ${pct}</span><button class="btn btn-ghost btn-sm" disabled>✔ Quiz Submitted</button>`;
+    const timeTaken = fmtMinutesTaken(q.timeTakenSeconds);
+    actions = `
+      <div><div class="cell-sub">Score</div><div style="font-weight:700;">${pct}</div></div>
+      ${timeTaken ? `<div><div class="cell-sub">Completed in</div><div style="font-weight:700;">${timeTaken}</div></div>` : ''}
+      <button class="btn btn-ghost btn-sm" disabled>✔ Completed</button>`;
   } else if (q.status === 'live' && q.canStart){
     actions = q.action === 'resume'
       ? `<button class="btn btn-primary btn-sm" onclick="resumeQuiz('${q.id}')">Resume Quiz</button>`
@@ -2036,19 +2093,47 @@ function quizCardHTML(q){
 
   return `<div class="card">
     <div class="card-head"><h3>${q.title || 'Quiz'}</h3><span class="badge ${badgeCls}">${badgeText}</span></div>
-    <p class="cell-sub" style="margin-bottom:6px;">${q.description || ''}</p>
-    <p class="cell-sub" style="margin-bottom:14px;">${metaBits}</p>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">${actions}</div>
+    <p class="cell-sub" style="margin-bottom:12px;">${q.description || ''}</p>
+    ${metaGrid}
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;">${actions}</div>
   </div>`;
 }
 
+function assessmentSearchableText(item){
+  // Title/quiz name + a few relevant fields, so the search box matches
+  // "assessment title, quiz name, or relevant fields" per spec.
+  return [item.name, item.title, item.description, item.section, item.category]
+    .filter(Boolean).join(' ').toLowerCase();
+}
+
 function renderAssessments(filter){
-  assessmentsFilter = filter;
+  if (filter !== undefined) assessmentsFilter = filter;
   const grid = document.getElementById('assessmentCards');
-  const order = filter === 'all' ? ['live','scheduled','attempted','completed'] : [filter];
+  const order = assessmentsFilter === 'all' ? ['live','scheduled','attempted','completed'] : [assessmentsFilter];
+  const term = assessmentsSearchTerm.trim().toLowerCase();
   const cards = [];
-  order.forEach(bucket => (assessmentBuckets[bucket] || []).forEach(item => cards.push(unifiedCardHTML(item, bucket))));
-  grid.innerHTML = cards.length ? cards.join('') : '<p class="cell-sub">No assessments in this view yet.</p>';
+  order.forEach(bucket => (assessmentBuckets[bucket] || []).forEach(item => {
+    if (term && !assessmentSearchableText(item).includes(term)) return;
+    cards.push(unifiedCardHTML(item, bucket));
+  }));
+  if (!cards.length){
+    grid.innerHTML = `<p class="cell-sub">${term ? 'No assessments match your search.' : 'No assessments in this view yet.'}</p>`;
+    return;
+  }
+  grid.innerHTML = cards.join('');
+}
+
+const globalSearchInput = document.getElementById('globalSearch');
+if (globalSearchInput){
+  globalSearchInput.addEventListener('input', () => {
+    assessmentsSearchTerm = globalSearchInput.value || '';
+    // Assessments are the only searchable dataset already loaded on the
+    // client; re-render live as the student types, on whichever tab is
+    // currently selected, without re-fetching from the backend.
+    if (document.getElementById('page-assessments').classList.contains('active')){
+      renderAssessments();
+    }
+  });
 }
 
 /* ============================================================
@@ -2069,16 +2154,14 @@ async function loadDashboardSnapshot(){
     document.getElementById('dashCollegeChip').textContent = `🏫 ${u.college || '—'}`;
   }
 
-  let overallScore = 0, skillRadar = {};
+  let skillRadar = {};
   if (chartsRes.ok){
-    overallScore = chartsRes.data.overallScore || 0;
+    // Section-wise dimension bars still come from /dashboard/charts (an
+    // existing, separate feature); the "Overall Score" figure itself is
+    // set below from /cohort-status, which is the single backend source
+    // of truth shared by Dashboard Home, My Cohort and Placement
+    // Readiness (Task 3/5/8).
     skillRadar = chartsRes.data.skillRadar || {};
-    document.getElementById('snapshotRingValue').innerHTML = `${overallScore}<span>/100</span>`;
-    const circumference = 465;
-    document.getElementById('snapshotRingFill').setAttribute('stroke-dashoffset', circumference - (circumference * overallScore / 100));
-    document.getElementById('dashReadinessValue').innerHTML = `${overallScore}<span>/100</span>`;
-    document.getElementById('ribbonOverallValue').textContent = `${overallScore}%`;
-
     const entries = Object.entries(skillRadar);
     if (entries.length){
       document.getElementById('dimensionBars').innerHTML = entries.map(([name, score]) => `
@@ -2087,26 +2170,16 @@ async function loadDashboardSnapshot(){
           <div class="bar-track"><div class="bar-fill" style="width:${score}%;${score < 50 ? 'background:linear-gradient(90deg,var(--rose),var(--amber));' : ''}"></div></div>
         </div>`).join('');
       const weakest = entries.reduce((min, e) => e[1] < min[1] ? e : min, entries[0]);
-      document.getElementById('snapshotHeadline').textContent = `Overall score ${overallScore}/100 across ${entries.length} section(s) — ${weakest[0]} is currently your lowest-scoring area.`;
       document.getElementById('snapshotBody').textContent = `Focus on ${weakest[0]} (${weakest[1]}%) to raise your overall employability score.`;
     } else {
       document.getElementById('dimensionBars').innerHTML = '<p class="cell-sub">No assessment scores yet.</p>';
     }
   }
 
-  if (resultsRes.ok){
-    const results = resultsRes.data.results || [];
-    const totalVisible = assessmentBuckets.upcoming.length + assessmentBuckets.pending.length + assessmentBuckets.attempted.length + assessmentBuckets.completed.length;
-    document.getElementById('ribbonQuizzesValue').innerHTML = `${results.length}<span>/${totalVisible || results.length}</span>`;
-  }
-
   if (cohortRes.ok){
     const c = cohortRes.data;
     const cohortLabel = c.cohort === 'entry_level' ? 'Entry Level' : `Cohort ${c.cohort}`;
     document.getElementById('dashCohortChip').textContent = `👥 Cohort: ${cohortLabel}`;
-    document.getElementById('ribbonCohortValue').textContent = cohortLabel;
-    document.getElementById('ribbonInterviewValue').textContent = c.interviewScore != null ? `${c.interviewScore}/100` : '—';
-    document.getElementById('dashReadinessBadge').textContent = cohortLabel;
     if (c.cohort === 'entry_level'){
       const missing = [];
       if (c.baselineAssessmentScore == null) missing.push('a baseline assessment');
@@ -2117,6 +2190,26 @@ async function loadDashboardSnapshot(){
     } else {
       document.getElementById('cohortSnapshotText').textContent = `You're in Cohort ${c.cohort}, based on your Final Employability Score (${c.finalEmployabilityScore ?? '—'}/100).`;
     }
+
+    // Task 5: Dashboard Home cards — Overall Score, Interview Score,
+    // Assessments Completed, Overall Cohort — all read straight from
+    // the backend-computed values, nothing calculated here.
+    const overallScore = c.overallScore != null ? c.overallScore : 0;
+    const overallCohortLabel = c.overallCohortLabel || 'Entry Level';
+    document.getElementById('snapshotRingValue').innerHTML = `${overallScore}<span>/100</span>`;
+    const circumference = 465;
+    document.getElementById('snapshotRingFill').setAttribute('stroke-dashoffset', circumference - (circumference * overallScore / 100));
+    document.getElementById('dashReadinessValue').innerHTML = `${overallScore}<span>/100</span>`;
+    document.getElementById('dashReadinessBadge').textContent = overallCohortLabel;
+    document.getElementById('ribbonOverallValue').textContent = c.overallScore != null ? `${c.overallScore}%` : '—';
+    document.getElementById('ribbonInterviewValue').textContent = c.averageInterviewScore != null ? `${c.averageInterviewScore}/100` : '—';
+    document.getElementById('ribbonCohortValue').textContent = overallCohortLabel;
+    document.getElementById('ribbonQuizzesValue').textContent = String(c.assessmentsCompleted ?? 0);
+
+    const entries = Object.entries(skillRadar);
+    document.getElementById('snapshotHeadline').textContent = entries.length
+      ? `Overall score ${overallScore}/100 across ${entries.length} section(s) — you're currently in ${overallCohortLabel}.`
+      : (c.assessmentsCompleted ? `Overall score ${overallScore}/100 — you're currently in ${overallCohortLabel}.` : 'Complete an assessment to see your employability snapshot.');
   }
 }
 
@@ -2214,12 +2307,17 @@ function openExam(data, kind){
   document.getElementById('examOverlay').classList.add('active');
   document.getElementById('examIntroState').style.display = 'block';
   document.getElementById('examActiveState').style.display = 'none';
+  // Task 7: Dedicated Exam Mode — hide sidebar/topbar/nav the moment the
+  // exam interface is shown (intro screen included), not just once the
+  // student clicks through to the first question.
+  document.body.classList.add('exam-mode-active');
 }
 function startExam(){
   // Legacy entry point kept for any stray callers — real flow goes through beginAssessment().
   document.getElementById('examOverlay').classList.add('active');
   document.getElementById('examIntroState').style.display = 'block';
   document.getElementById('examActiveState').style.display = 'none';
+  document.body.classList.add('exam-mode-active');
 }
 function buildPalette(){
   const grid = document.getElementById('paletteGrid');
@@ -2233,7 +2331,11 @@ function buildPalette(){
   }
   grid.innerHTML = html;
 }
-function jumpTo(i){ examState.current = i; renderQuestion(); }
+function jumpTo(i){
+  if (i < 0 || i >= TOTAL_Q) return;
+  examState.current = i;
+  renderQuestion();
+}
 function renderQuestion(){
   const n = examState.current+1;
   const q = examMeta.questions[examState.current];
@@ -2259,6 +2361,17 @@ function renderQuestion(){
       </label>`).join('');
   }
   buildPalette();
+  updateExamNavButtons();
+}
+function updateExamNavButtons(){
+  const prevBtn = document.getElementById('examPrevBtn');
+  const nextBtn = document.getElementById('examNextBtn');
+  const isFirst = examState.current <= 0;
+  const isLast = examState.current >= TOTAL_Q - 1;
+  // Task 7: on the first question, Previous is disabled/hidden; on the
+  // last question, Next is hidden and only Finish/Submit remains.
+  if (prevBtn) prevBtn.style.display = isFirst ? 'none' : '';
+  if (nextBtn) nextBtn.style.display = isLast ? 'none' : '';
 }
 async function saveQuizAnswer(poolIndex, selected){
   if (examMeta.kind !== 'quiz' || !examMeta.attemptId) return;
@@ -2392,6 +2505,7 @@ function completeExam(message){
   clearInterval(examState.timerId);
   if (document.exitFullscreen && document.fullscreenElement) document.exitFullscreen().catch(()=>{});
   document.getElementById('examOverlay').classList.remove('active');
+  document.body.classList.remove('exam-mode-active');
   document.getElementById('examSubmittedReason').textContent = message;
   openModal('modalExamSubmitted');
 }

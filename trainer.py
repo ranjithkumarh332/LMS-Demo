@@ -11,7 +11,7 @@ The Entry Level cohort option and assignment rule is IDENTICAL to
 Super Admin — both call the same quiz_common helpers.
 """
 
-from flask import Blueprint, request
+from flask import Blueprint, request, send_file
 from flask_jwt_extended import get_jwt_identity
 
 from quiz_common import (
@@ -22,6 +22,7 @@ from quiz_common import (
     list_quiz_results, set_quiz_interview_marks, validate_quiz_result,
     serialize_quiz_result, RESULT_STATUS_INTERVIEW_DONE, RESULT_STATUS_VALIDATED,
     compute_quiz_analytics, list_quiz_responses,
+    list_distinct_departments, build_quiz_responses_workbook,
 )
 from colleges import resolve_active_department
 
@@ -224,7 +225,43 @@ def init_trainer(db):
         college = _trainer_college()
         cohort = request.args.get("cohort") or "all"
         quiz_id = request.args.get("quizId") or "all"
-        return ok({"responses": list_quiz_responses(db, college=college, cohort=cohort, quiz_id=quiz_id)})
+        department = request.args.get("department") or "all"
+        search = request.args.get("search") or ""
+        return ok({"responses": list_quiz_responses(
+            db, college=college, cohort=cohort, quiz_id=quiz_id,
+            department=department, search=search,
+        )})
+
+    @bp.route("/quiz-responses/filters", methods=["GET"])
+    @role_required("trainer")
+    def quiz_responses_filters():
+        """Course/Department dropdown options for the Quiz Responses
+        filter bar — distinct values actually in use by this trainer's
+        own students, read live from the database, never hardcoded."""
+        return ok({"departments": list_distinct_departments(db, college=_trainer_college())})
+
+    @bp.route("/quiz-responses/export", methods=["GET"])
+    @role_required("trainer")
+    def quiz_responses_export():
+        """Backend-generated .xlsx of exactly what the Quiz Responses
+        table is currently showing — same filters, same query, same
+        rows; nothing is regenerated or recomputed differently here."""
+        college = _trainer_college()
+        cohort = request.args.get("cohort") or "all"
+        quiz_id = request.args.get("quizId") or "all"
+        department = request.args.get("department") or "all"
+        search = request.args.get("search") or ""
+        rows = list_quiz_responses(
+            db, college=college, cohort=cohort, quiz_id=quiz_id,
+            department=department, search=search, limit=100000,
+        )
+        buf = build_quiz_responses_workbook(rows)
+        return send_file(
+            buf,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name="quiz_responses.xlsx",
+        )
 
     @bp.route("/quiz-analytics", methods=["GET"])
     @role_required("trainer")
@@ -238,7 +275,12 @@ def init_trainer(db):
         """
         cohort = request.args.get("cohort") or "all"
         quiz_id = request.args.get("quizId") or "all"
-        return ok(compute_quiz_analytics(db, college=_trainer_college(), cohort=cohort, quiz_id=quiz_id))
+        department = request.args.get("department") or "all"
+        search = request.args.get("search") or ""
+        return ok(compute_quiz_analytics(
+            db, college=_trainer_college(), cohort=cohort, quiz_id=quiz_id,
+            department=department, search=search,
+        ))
 
     @bp.route("/manual-interview", methods=["GET"])
     @role_required("trainer")
@@ -358,16 +400,23 @@ def init_trainer(db):
     @role_required("trainer")
     def quiz_results():
         """Assessment Responses: every student who has actually
-        submitted a Create-Quiz quiz, scoped to this trainer's college."""
-        return ok({"results": list_quiz_results(db, college=_trainer_college())})
+        submitted a Create-Quiz quiz, scoped to this trainer's college.
+        `search` matches Student Name / Roll Number / Register Number,
+        resolved entirely by the database (see quiz_common._student_search_query)."""
+        search = request.args.get("search") or ""
+        return ok({"results": list_quiz_results(db, college=_trainer_college(), search=search)})
 
     @bp.route("/quiz-interview-verification", methods=["GET"])
     @role_required("trainer")
     def quiz_interview_verification():
         """Students eligible for interview verification: anyone who has
         submitted at least one quiz. Includes rows already scored (so the
-        trainer can see/update them) — the frontend groups by `status`."""
-        return ok({"results": list_quiz_results(db, college=_trainer_college())})
+        trainer can see/update them) — the frontend groups by `status`.
+        `search` matches Assessment Name / Student Name / Roll Number /
+        College / Department, resolved entirely by the database (see
+        quiz_common._verification_search_query)."""
+        search = request.args.get("search") or ""
+        return ok({"results": list_quiz_results(db, college=_trainer_college(), search=search, broad_search=True)})
 
     @bp.route("/quiz-interview-verification/<attempt_id>/marks", methods=["POST"])
     @role_required("trainer")
@@ -395,10 +444,14 @@ def init_trainer(db):
     @role_required("trainer")
     def quiz_validation_verification():
         """Only results that have a Final Average + assigned Cohort —
-        i.e. interview marks have already been entered."""
+        i.e. interview marks have already been entered. `search` matches
+        Assessment Name / Student Name / Roll Number / College /
+        Department, same as Interview Verification above."""
+        search = request.args.get("search") or ""
         return ok({"results": list_quiz_results(
             db, college=_trainer_college(),
             statuses=[RESULT_STATUS_INTERVIEW_DONE, RESULT_STATUS_VALIDATED],
+            search=search, broad_search=True,
         )})
 
     @bp.route("/quiz-validation-verification/<attempt_id>/validate", methods=["POST"])

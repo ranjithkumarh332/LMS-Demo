@@ -31,7 +31,7 @@ from quiz_common import (
     record_assessment_score_for_cohort, student_cohort_label,
     cohort_query_for_target, student_matches_cohort_target,
     log_activity, init_quiz_result_fields, serialize_quiz_result,
-    list_quiz_results,
+    list_quiz_results, compute_overall_performance, top_cohort_label,
 )
 
 # Manually-authored quizzes (Trainer/Super Admin "Create Quiz" wizard,
@@ -97,8 +97,18 @@ def init_student(db):
         college with no department means "all departments in that
         college". Department is only meaningful once college is scoped,
         matching the creation form's own nested logic.
+
+        Null-safety (spec: "Validate Existing Database... handle null
+        safely"): an assessment created before cohortTarget existed, or
+        with it unset for any other reason, is treated as "all" — the
+        same default quiz_module's eligibility check already used — so a
+        missing field hides the assessment from nobody instead of hiding
+        it from every Cohort A/B/C student (only Entry Level students,
+        who have no `cohort` value, would previously have been able to
+        see it — an accidental near-total-hide rather than a deliberate
+        "all cohorts" default).
         """
-        if not student_matches_cohort_target(student, assessment.get("cohortTarget")):
+        if not student_matches_cohort_target(student, assessment.get("cohortTarget") or "all"):
             return False
         assess_college = assessment.get("college")
         if assess_college:
@@ -390,12 +400,102 @@ def init_student(db):
     @role_required("student")
     def cohort_status():
         student = _current_student()
+        # Task 3/4/5/8: Overall Score, Overall Cohort, average Interview
+        # Score, Assessments Completed and Placement Readiness are ALL
+        # computed once, server-side, in compute_overall_performance() —
+        # this route (used by Dashboard Home and My Cohort) and /readiness
+        # below both read the exact same computed dict, so these numbers
+        # can never drift apart between pages.
+        overall = compute_overall_performance(db, student["_id"]) or {}
+        # Part 5 — StudentCohort collection: db.users.cohort (via
+        # student_cohort_label above) stays the authoritative value this
+        # route has always returned, so nothing that reads `cohort` here
+        # changes behavior; `cohortLastUpdated`/`cohortSource` are new,
+        # purely additive fields sourced from the dedicated collection.
+        cohort_record = db.student_cohort.find_one({"studentId": student["_id"]})
         return ok({
             "cohort": student_cohort_label(student),
             "baselineAssessmentScore": student.get("baselineAssessmentScore"),
             "interviewScore": student.get("interviewScore"),
             "finalEmployabilityScore": student.get("finalEmployabilityScore"),
             "cohortAssignedAt": student["cohortAssignedAt"].isoformat() if student.get("cohortAssignedAt") else None,
+            "cohortLastUpdated": cohort_record["lastUpdated"].isoformat() if cohort_record and cohort_record.get("lastUpdated") else None,
+            "cohortSource": cohort_record.get("source") if cohort_record else None,
+            # New, backend-computed "Overall Cohort Calculation" fields:
+            "overallScore": overall.get("overallScore"),
+            "overallCohort": overall.get("overallCohort"),
+            "overallCohortLabel": overall.get("overallCohortLabel"),
+            "averageInterviewScore": overall.get("averageInterviewScore"),
+            "assessmentsCompleted": overall.get("assessmentsCompleted"),
+            "placementReadiness": overall.get("placementReadiness"),
+        })
+
+    # ==========================================================
+    # 3c. PLACEMENT READINESS — score + Ready/Not Ready, computed from
+    #     compute_overall_performance() (same numbers as /cohort-status
+    #     and Dashboard Home), plus a dynamic missing-skills /
+    #     recommendations / roadmap breakdown for the Placement
+    #     Readiness page. Nothing here is hardcoded content — every
+    #     line is derived from this student's own stored results.
+    # ==========================================================
+    @bp.route("/readiness", methods=["GET"])
+    @role_required("student")
+    def placement_readiness_route():
+        student = _current_student()
+        if not student:
+            return error("Student not found.", 404)
+
+        overall = compute_overall_performance(db, student["_id"]) or {}
+        readiness = overall.get("placementReadiness") or {}
+
+        # Section-wise weak areas, from this student's own submitted
+        # baseline-assessment section scores (same aggregation used by
+        # /dashboard/charts and the existing download_report() 50%
+        # "needs focus" convention above — never a newly-invented rule).
+        section_agg = {}
+        for att in attempts.find({"studentId": student["_id"], "status": "submitted"}):
+            for section, s in att.get("sectionScores", {}).items():
+                bucket = section_agg.setdefault(section, {"sum": 0.0, "n": 0})
+                bucket["sum"] += s.get("percentage", 0)
+                bucket["n"] += 1
+        skill_radar = {section: round(b["sum"] / b["n"], 2) if b["n"] else 0 for section, b in section_agg.items()}
+        weak_sections = sorted(
+            [(section, pct) for section, pct in skill_radar.items() if pct < 50],
+            key=lambda pair: pair[1],
+        )
+        missing_skills = [f"{section} ({pct}%)" for section, pct in weak_sections]
+        recommendations = [f"Focus on improving {section} — currently at {pct}%." for section, pct in weak_sections]
+
+        top_cohort = top_cohort_label(db)
+        roadmap = [
+            {
+                "title": "Complete a validated assessment",
+                "status": "done" if overall.get("assessmentsCompleted", 0) > 0 else "pending",
+                "detail": f"{overall.get('assessmentsCompleted', 0)} assessment(s) validated so far.",
+            },
+            {
+                "title": "Get your manual interview scored",
+                "status": "done" if overall.get("averageInterviewScore") is not None else "pending",
+                "detail": "Interview marks are entered by your trainer or Super Admin after each assessment.",
+            },
+            {
+                "title": f"Reach Cohort {top_cohort}",
+                "status": "done" if readiness.get("ready") else ("progress" if overall.get("overallCohort") else "pending"),
+                "detail": readiness.get("summary", ""),
+            },
+        ]
+
+        return ok({
+            "score": readiness.get("score", 0),
+            "ready": readiness.get("ready", False),
+            "statusLabel": readiness.get("statusLabel", "Not Ready"),
+            "summary": readiness.get("summary", ""),
+            "overallCohort": overall.get("overallCohort"),
+            "overallCohortLabel": overall.get("overallCohortLabel"),
+            "assessmentsCompleted": overall.get("assessmentsCompleted"),
+            "missingSkills": missing_skills,
+            "recommendations": recommendations,
+            "roadmap": roadmap,
         })
 
     # ==========================================================
@@ -698,6 +798,11 @@ def init_student(db):
             "action": "resume" if has_in_progress else "start",
             "attemptId": str(attempt["_id"]) if attempt else None,
             "result": attempt.get("overall") if has_submitted else None,
+            # Part 4/9 — "Completed in XX Minutes": timeTakenSeconds is
+            # already computed and stored on the attempt at submit time
+            # (see _finalize_attempt: submittedAt - startedAt), it just
+            # wasn't being surfaced on the card payload before.
+            "timeTakenSeconds": attempt.get("timeTakenSeconds") if has_submitted else None,
         }
 
     def _attempt_payload(quiz, attempt, drawn=None):

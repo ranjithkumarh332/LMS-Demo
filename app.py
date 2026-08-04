@@ -170,6 +170,22 @@ try:
     db.quizzes.create_index([("createdBy.college", 1)])
     db.quiz_sections.create_index("name", unique=True)
 
+    # Question Bank (question_bank.py, Create Quiz Part 5) — permanent
+    # store of every validated question Trainer/Super Admin have ever
+    # entered, drawn from by Super Admin's Question Bank quiz-creation
+    # mode. questionHash is unique so a duplicate (same section + text +
+    # options) can never be inserted twice, even under concurrent writes.
+    db.question_bank.create_index("questionHash", unique=True)
+    db.question_bank.create_index([("section", 1), ("difficulty", 1), ("active", 1)])
+    db.question_bank.create_index("uploadedAt")
+
+    # StudentCohort (quiz_common.py, Part 5) — one document per student,
+    # kept as an additive mirror of db.users.cohort (see
+    # sync_student_cohort_record's docstring for why db.users.cohort
+    # itself stays the source every eligibility check reads).
+    db.student_cohort.create_index("studentId", unique=True)
+    db.student_cohort.create_index("rollNumber")
+
     # Student Quiz Attempt module (student.py) — one doc per student per
     # quiz; the compound index also enforces "no second attempt" lookups
     # stay O(1) as attempt volume grows.
@@ -220,6 +236,7 @@ from trainer import init_trainer  # noqa: E402
 from student import init_student  # noqa: E402
 from colleges import init_colleges  # noqa: E402
 from quiz_module import init_quiz  # noqa: E402
+from question_bank import init_question_bank  # noqa: E402
 from collegeadmin import init_collegeadmin  # noqa: E402
 
 auth_bp = init_auth(
@@ -242,6 +259,12 @@ app.register_blueprint(init_student(db=db), url_prefix="/api/student")
 # quizzes; super admin: full platform visibility and control).
 app.register_blueprint(init_quiz(db=db, scope="trainer"), url_prefix="/api/trainer")
 app.register_blueprint(init_quiz(db=db, scope="super_admin"), url_prefix="/api/admin")
+
+# Question Bank (Part 4/5/6) — read-only summary/list endpoints; writes
+# only ever happen internally from quiz_module.py's create/update-quiz
+# flow, never directly from the frontend.
+app.register_blueprint(init_question_bank(db=db, scope="trainer"), url_prefix="/api/trainer")
+app.register_blueprint(init_question_bank(db=db, scope="super_admin"), url_prefix="/api/admin")
 
 # College Management — /api/admin/colleges (Super Admin CRUD) and
 # /api/public/colleges (unauthenticated dropdown reads).
