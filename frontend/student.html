@@ -1412,6 +1412,7 @@ body.exam-mode-active{ overflow:hidden; }
 ============================================================ -->
 <div class="toast-container" id="toastContainer"></div>
 
+<script src="auth-common.js"></script>
 <script>
 /* ============================================================
    0. LOADER
@@ -1435,6 +1436,14 @@ function applyTheme(t){
 applyTheme(localStorage.getItem('eip_theme') || 'light');
 themeToggle.addEventListener('click', () => applyTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
 document.addEventListener('change', (e) => { if (e.target.id === 'themeSelect') applyTheme(e.target.value); });
+
+/* ============================================================
+   1a. SESSION GUARD — now provided by auth-common.js (see <script
+   src="auth-common.js"> above), which also supplies the shared
+   EIP.logout() implementation and the bfcache Back-button guard.
+   Kept as a single implementation instead of one inline copy per
+   dashboard — see that file's header comment for details.
+============================================================ */
 
 /* ============================================================
    1b. API INTEGRATION HELPERS — wired to /api/student (+ /api/auth/me)
@@ -2659,9 +2668,8 @@ async function verifyPasswordOtp(){
 /* ============================================================
    12c. LOGOUT
 ============================================================ */
-async function logout(){
-  await apiPost('/logout', {}, AUTH_API_BASE);
-  window.location.href = '/login.html';
+function logout(){
+  return window.EIP.logout({ button: logoutNavItem });
 }
 const logoutNavItem = document.getElementById('logoutNavItem');
 if (logoutNavItem) logoutNavItem.addEventListener('click', logout);

@@ -745,7 +745,14 @@ table.data-table{ width:100%; border-collapse:collapse; font-size:13.5px; min-wi
 <div id="app"></div>
 <div id="modal-root"></div>
 <div id="toast-root" class="toast-container"></div>
+<script src="auth-common.js"></script>
 <script>
+/* ============================================================
+   SESSION GUARD — now provided by auth-common.js (see <script
+   src="auth-common.js"> above), which also supplies the shared
+   EIP.logout() implementation and the bfcache Back-button guard.
+============================================================ */
+
 /* ============================================================
    ICONS — compact inline SVG set, consistent stroke style
 ============================================================ */
@@ -982,8 +989,7 @@ async function platformApiPatch(path, body){
 }
 
 // Same shape as platformApiGet/platformApiPut, for deletes — used to
-// revoke a single active session or all sessions (see revokeSession()/
-// logOutAllSessions()).
+// revoke a single active session (see revokeSession()).
 async function platformApiDelete(path){
   try {
     const res = await fetch(PLATFORM_API + path, { method:'DELETE', credentials:'include' });
@@ -1924,6 +1930,7 @@ function buildShell(){
             ${avatarChip(SUPER_ADMIN_PROFILE.name)}
             <div class="who"><b>${esc(SUPER_ADMIN_PROFILE.name)}</b><span>${esc(SUPER_ADMIN_PROFILE.role)}</span></div>
           </div>
+          <button class="btn-icon" data-action="logout" title="Log out" aria-label="Log out">${ic('logout')}</button>
         </div>
       </header>
       <main class="main-content" id="page-root"></main>
@@ -3380,7 +3387,7 @@ function pageProfile(){
         <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);"><span style="font-size:13.5px;">Two-factor authentication</span><div class="switch on" data-action="toggle-switch"></div></div>
         <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);"><span style="font-size:13.5px;">Active sessions</span><span class="mono" style="font-size:12px;">${SESSIONS.length} device${SESSIONS.length===1?'':'s'}</span></div>
         ${renderSessionsList()}
-        <button class="btn btn-danger btn-sm" style="margin-top:16px;width:100%;justify-content:center;" data-action="log-out">${ic('logout','icon icon-sm')}Log out of all sessions</button>
+        <button class="btn btn-danger btn-sm" style="margin-top:16px;width:100%;justify-content:center;" data-action="log-out">${ic('logout','icon icon-sm')}Log out</button>
       </div>
     </div>
   </div>`;
@@ -3459,20 +3466,6 @@ async function revokeSession(id){
     showToast('Session revoked');
   } else {
     showToast(res.data?.message || 'Could not revoke session', true);
-  }
-}
-
-// Ends every active session (including this one) via DELETE
-// /auth/sessions, mirroring the "Log out of all sessions" button copy.
-async function logOutAllSessions(){
-  const res = await platformApiDelete('/auth/sessions');
-  if(res.ok){
-    showToast('Logged out of all sessions', true);
-    // The current session was just revoked too — send the admin back
-    // to the login flow rather than leaving a now-invalid session active.
-    window.location.reload();
-  } else {
-    showToast(res.data?.message || 'Could not log out of all sessions', true);
   }
 }
 
@@ -3752,7 +3745,17 @@ document.addEventListener('click', function(e){
     case 'save-settings': showToast('Settings saved'); break;
     case 'save-profile': saveProfile(); break;
     case 'change-password': openConfirm({icon:'key', title:'Change password', message:'A confirmation link will be sent to your registered email.', confirmLabel:'Send Link', onConfirm:()=>showToast('Confirmation link sent')}); break;
-    case 'log-out': openConfirm({icon:'logout', danger:true, title:'Log out everywhere?', message:'This ends all active sessions on every device.', confirmLabel:'Log Out', onConfirm:()=>logOutAllSessions()}); break;
+    // Bug fix: this previously called logOutAllSessions(), which hit
+    // DELETE /auth/sessions — an endpoint that doesn't exist anywhere
+    // in the backend, so this button always failed silently with an
+    // error toast and never actually logged the admin out. Since this
+    // account only ever has a single active session server-side
+    // (login elsewhere already auto-invalidates the old one), a
+    // normal logout via the shared EIP.logout() is the correct fix.
+    case 'log-out': openConfirm({icon:'logout', danger:true, title:'Log out?', message:'This ends your current session and returns you to the login page.', confirmLabel:'Log Out', onConfirm:()=>window.EIP.logout()}); break;
+    // Every role's Logout button — Super Admin previously had no
+    // reachable one at all outside this Settings page.
+    case 'logout': openConfirm({icon:'logout', danger:true, title:'Log out?', message:'This ends your current session and returns you to the login page.', confirmLabel:'Log Out', onConfirm:()=>window.EIP.logout()}); break;
     case 'revoke-session': revokeSession(el.dataset.id); break;
     case 'preview-resume': showToast('Opening resume preview'); break;
   }

@@ -419,7 +419,14 @@ th.sortable .sort-arrow{ display:inline-block; margin-left:3px; opacity:0.5; }
 <div id="app"></div>
 <div id="modal-root"></div>
 <div id="toast-root" class="toast-container"></div>
+<script src="auth-common.js"></script>
 <script>
+/* ============================================================
+   SESSION GUARD — now provided by auth-common.js (see <script
+   src="auth-common.js"> above), which also supplies the shared
+   EIP.logout() implementation and the bfcache Back-button guard.
+============================================================ */
+
 /* ============================================================
    ICONS
 ============================================================ */
@@ -2109,7 +2116,12 @@ document.addEventListener('click', (e)=>{
       break;
     }
     case 'mark-all-read': NOTIFICATIONS.forEach(n=>n.unread=false); renderPage(); showToast('All notifications marked as read'); break;
-    case 'logout': confirmModal({title:'Log Out', body:'Are you sure you want to log out of the College Admin dashboard?', confirmLabel:'Log Out', confirmClass:'btn-danger', onConfirm:()=>{ closeModal(); showToast('Logged out successfully','info'); }}); break;
+    // Bug fix: this previously only closed the modal and showed a
+    // "Logged out successfully" toast — it never called the backend,
+    // never cleared the auth cookie, and never redirected, so the
+    // admin was still fully logged in afterward. Now routed through
+    // the shared EIP.logout(), same as every other role.
+    case 'logout': confirmModal({title:'Log Out', body:'Are you sure you want to log out of the College Admin dashboard?', confirmLabel:'Log Out', confirmClass:'btn-danger', onConfirm:()=>{ closeModal(); window.EIP.logout(); }}); break;
 
     case 'set-tab': {
       const group = el.dataset.group, value = el.dataset.value;

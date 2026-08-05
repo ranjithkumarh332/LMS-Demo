@@ -101,6 +101,21 @@ def _now():
     return datetime.utcnow()
 
 
+# Fixed key for the single-document collection that tracks the hardcoded
+# Super Admin's active session (Super Admin has no row in db.users, since
+# its credentials come from the environment, not the database — see the
+# "Super Admin: hardcoded" branch in login() below).
+SUPER_ADMIN_SESSION_KEY = "super_admin"
+
+
+def _new_session_id():
+    """Opaque, unguessable identifier for a single login session (Single
+    Active Session feature). A fresh one is minted on every successful
+    login and stored server-side; it travels inside the JWT as the "sid"
+    claim so every subsequent request can be checked against it."""
+    return secrets.token_hex(20)
+
+
 def normalize_role(role):
     if not role:
         return role
@@ -108,7 +123,7 @@ def normalize_role(role):
     return ROLE_ALIASES.get(role, role)
 
 
-def init_auth(bcrypt, db, limiter, firebase_ready=False):
+def init_auth(bcrypt, db, limiter, jwt, firebase_ready=False):
     """
     Build and return the auth Blueprint.
 
@@ -117,12 +132,22 @@ def init_auth(bcrypt, db, limiter, firebase_ready=False):
     bcrypt : flask_bcrypt.Bcrypt      — for hashing / checking passwords
     db     : pymongo.database.Database — the MongoDB database handle
     limiter: flask_limiter.Limiter    — for per-route rate limiting
+    jwt    : flask_jwt_extended.JWTManager — used to register the
+             single-active-session callbacks (token_in_blocklist_loader /
+             revoked_token_loader) so every @jwt_required()-protected
+             route across the whole app (not just this blueprint) enforces
+             single-session automatically, with zero changes required in
+             superadmin.py / trainer.py / student.py / collegeadmin.py /
+             colleges.py / quiz_module.py / question_bank.py.
     firebase_ready : bool             — whether Firebase Admin was initialized
     """
     auth_bp = Blueprint("auth", __name__)
 
     users = db.users
     otp_verifications = db.otp_verifications
+    # Single-document collection: tracks the current session id for the
+    # hardcoded Super Admin account only (it has no db.users row).
+    super_admin_sessions = db.super_admin_sessions
 
     # --------------------------------------------------------
     # Small internal helpers
@@ -185,12 +210,41 @@ def init_auth(bcrypt, db, limiter, firebase_ready=False):
             "createdAt": created_at.isoformat() if created_at else None,
         }
 
-    def issue_token_response(role, identity, extra_claims=None):
-        claims = {"role": role}
+    def issue_token_response(role, identity, session_id, extra_claims=None):
+        # "sid" is the single-active-session marker: every request re-checks
+        # this value against the latest one stored server-side (see the
+        # token_in_blocklist_loader registered below). A brand new login
+        # always mints a brand new sid, which immediately makes every
+        # previously issued token for this account fail that check.
+        claims = {"role": role, "sid": session_id}
         if extra_claims:
             claims.update(extra_claims)
         token = create_access_token(identity=identity, additional_claims=claims)
         return token
+
+    def _start_new_session(role, identity):
+        """Mint a new session id and persist it as THE current session for
+        this account, replacing whatever was there before. Returns the new
+        session id (to embed in the JWT claims)."""
+        session_id = _new_session_id()
+        if role == "super_admin":
+            super_admin_sessions.update_one(
+                {"_id": SUPER_ADMIN_SESSION_KEY},
+                {"$set": {"sessionId": session_id, "lastLoginAt": _now()}},
+                upsert=True,
+            )
+        else:
+            users.update_one(
+                {"_id": ObjectId(identity)},
+                {
+                    "$set": {
+                        "currentSessionId": session_id,
+                        "lastLoginAt": _now(),
+                        "lastLoginDevice": (request.headers.get("User-Agent") or "")[:255],
+                    }
+                },
+            )
+        return session_id
 
     def role_required(*allowed_roles):
         """Decorator: restrict a route to one or more JWT roles."""
@@ -479,7 +533,8 @@ def init_auth(bcrypt, db, limiter, firebase_ready=False):
         # -------- Super Admin: hardcoded, single account, no DB lookup --------
         if selected_role == "super_admin":
             if email == SUPER_ADMIN_EMAIL.lower() and password == SUPER_ADMIN_PASSWORD:
-                token = issue_token_response("super_admin", "super_admin")
+                session_id = _start_new_session("super_admin", "super_admin")
+                token = issue_token_response("super_admin", "super_admin", session_id)
                 resp = ok(
                     {
                         "token": token,
@@ -511,7 +566,8 @@ def init_auth(bcrypt, db, limiter, firebase_ready=False):
         if status != "approved":
             return error("Your account is not active. Contact the administrator.", 403)
 
-        token = issue_token_response(user["role"], str(user["_id"]))
+        session_id = _start_new_session(user["role"], str(user["_id"]))
+        token = issue_token_response(user["role"], str(user["_id"]), session_id)
         resp = ok(
             {
                 "token": token,
@@ -528,7 +584,28 @@ def init_auth(bcrypt, db, limiter, firebase_ready=False):
     # LOGOUT
     # ==========================================================
     @auth_bp.route("/logout", methods=["POST"])
+    @jwt_required(optional=True)
     def logout():
+        # optional=True: logout must succeed even if the token here is
+        # already stale (e.g. this very tab was the one that just got
+        # kicked out by a login elsewhere) — we still want to clear
+        # whatever session record remains and unset the cookies.
+        claims = get_jwt() or {}
+        identity = get_jwt_identity()
+        role = claims.get("role")
+        if role == "super_admin":
+            super_admin_sessions.update_one(
+                {"_id": SUPER_ADMIN_SESSION_KEY},
+                {"$set": {"sessionId": None}},
+                upsert=True,
+            )
+        elif identity:
+            try:
+                oid = ObjectId(identity)
+            except InvalidId:
+                oid = None
+            if oid:
+                users.update_one({"_id": oid}, {"$set": {"currentSessionId": None}})
         resp = ok(message="Logged out.")
         unset_jwt_cookies(resp[0])
         return resp
@@ -672,7 +749,8 @@ def init_auth(bcrypt, db, limiter, firebase_ready=False):
         if status == "rejected":
             return error("Your account has been rejected.", 403)
 
-        token = issue_token_response(user["role"], str(user["_id"]))
+        session_id = _start_new_session(user["role"], str(user["_id"]))
+        token = issue_token_response(user["role"], str(user["_id"]), session_id)
         resp = ok(
             {
                 "token": token,
@@ -815,5 +893,52 @@ def init_auth(bcrypt, db, limiter, firebase_ready=False):
     @role_required("super_admin", "trainer")
     def reject_user(user_id):
         return _set_approval(user_id, "rejected")
+
+    # ==========================================================
+    # SINGLE ACTIVE SESSION — global JWT enforcement
+    # ==========================================================
+    # These two callbacks are registered on the app's single JWTManager
+    # instance, so flask-jwt-extended runs them automatically inside
+    # EVERY jwt_required() check across the whole app (this file's own
+    # role_required(), quiz_common.role_required() used by superadmin.py /
+    # trainer.py / student.py / collegeadmin.py / colleges.py /
+    # quiz_module.py / question_bank.py, and the bare @jwt_required()
+    # routes like /me). No other file needs to change.
+    @jwt.token_in_blocklist_loader
+    def _reject_superseded_sessions(_jwt_header, jwt_payload):
+        """Return True (token is revoked / rejected) whenever the token's
+        embedded session id no longer matches the latest one on record —
+        i.e. a newer login has happened since this token was issued."""
+        role = jwt_payload.get("role")
+        token_sid = jwt_payload.get("sid")
+
+        # Tokens issued before this feature shipped carry no "sid" claim.
+        # Treat them as superseded so every account is forced through the
+        # new single-session flow instead of silently bypassing it.
+        if not token_sid:
+            return True
+
+        if role == "super_admin":
+            record = super_admin_sessions.find_one({"_id": SUPER_ADMIN_SESSION_KEY})
+            current_sid = record.get("sessionId") if record else None
+            return current_sid != token_sid
+
+        identity = jwt_payload.get("sub")
+        try:
+            oid = ObjectId(identity)
+        except (InvalidId, TypeError):
+            return True
+
+        user = users.find_one({"_id": oid}, {"currentSessionId": 1, "approvalStatus": 1})
+        if not user or user.get("approvalStatus") != "approved":
+            return True
+        return user.get("currentSessionId") != token_sid
+
+    @jwt.revoked_token_loader
+    def _superseded_session_response(_jwt_header, _jwt_payload):
+        return jsonify(
+            success=False,
+            message="Your account has been logged in from another device.",
+        ), 401
 
     return auth_bp

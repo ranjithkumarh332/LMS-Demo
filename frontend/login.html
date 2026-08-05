@@ -796,6 +796,31 @@ function hideFormAlert(panelId){
   if (el) el.style.display = 'none';
 }
 
+/* ============================================================
+   JS — SESSION-REPLACED NOTICE
+   If the dashboard's session guard (see student.html / trainer.html /
+   super_admin.html / college_admin.html) redirected here because this
+   account was logged in from another device, surface that message on
+   the login panel using the same alert UI as everything else above.
+   No page redesign — just reads a one-time flag and clears it so a
+   manual refresh of login.html doesn't keep re-showing it.
+============================================================ */
+(function showSessionReplacedNoticeIfAny(){
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const stored = sessionStorage.getItem('eip_session_message');
+    if (params.get('sessionExpired') === '1' || stored) {
+      showFormAlert('login', stored || 'Your account has been logged in on another device.');
+      sessionStorage.removeItem('eip_session_message');
+      if (params.has('sessionExpired')) {
+        params.delete('sessionExpired');
+        const qs = params.toString();
+        window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
+      }
+    }
+  } catch (e) { /* sessionStorage unavailable — silently skip the notice */ }
+})();
+
 async function apiRequest(path, body){
   let res, data;
   try {

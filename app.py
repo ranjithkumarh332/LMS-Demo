@@ -91,6 +91,13 @@ app.config["JWT_COOKIE_SAMESITE"] = "Lax"
 # before shipping this to production.
 app.config["JWT_COOKIE_CSRF_PROTECT"] = os.getenv("JWT_COOKIE_CSRF_PROTECT", "false").lower() == "true"
 
+# Single Active Session: every jwt_required() check also runs the
+# token_in_blocklist_loader registered in login.py, which rejects a token
+# the moment a newer login has superseded it. Only access tokens exist in
+# this app (no refresh-token flow), so only that check type is enabled.
+app.config["JWT_BLOCKLIST_ENABLED"] = True
+app.config["JWT_BLOCKLIST_TOKEN_CHECKS"] = ["access"]
+
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 
@@ -243,6 +250,7 @@ auth_bp = init_auth(
     bcrypt=bcrypt,
     db=db,
     limiter=limiter,
+    jwt=jwt,
     firebase_ready=firebase_ready,
 )
 app.register_blueprint(auth_bp, url_prefix="/api/auth")

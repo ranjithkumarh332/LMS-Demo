@@ -738,7 +738,7 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
           <div class="u-name" id="sidebarUserName">—</div>
           <div class="u-role" id="sidebarUserRole">—</div>
         </div>
-        <button class="icon-btn" style="width:30px;height:30px;" title="Sign out" onclick="signOut()">⎋</button>
+        <button class="icon-btn" style="width:30px;height:30px;" title="Sign out" onclick="signOut(this)">⎋</button>
       </div>
     </div>
   </aside>
@@ -1609,7 +1609,14 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
 <div class="toast-wrap" id="toastWrap"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="auth-common.js"></script>
 <script>
+/* ============================================================
+   SESSION GUARD — now provided by auth-common.js (see <script
+   src="auth-common.js"> above), which also supplies the shared
+   EIP.logout() implementation and the bfcache Back-button guard.
+============================================================ */
+
 /* ============================================================ REFERENCE DATA / CONFIG ============================================================
    These lists back filter dropdowns and generated roll-number prefixes.
    They mirror the college's department/cohort structure and can be swapped
@@ -1928,11 +1935,17 @@ async function saveMyInfo(){
   showToast('Your info has been updated', '✓');
 }
 
-/* ============================================================ SIGN OUT ============================================================ */
-function signOut(){
+/* ============================================================ SIGN OUT ============================================================
+   Bug fix: this previously never called the backend at all — it just
+   showed a toast and redirected to "index.html", a page that doesn't
+   exist in this project (only login.html/trainer.html/... do), which
+   is exactly why clicking Sign Out threw an error instead of logging
+   out. It's now routed through the shared EIP.logout(), same as every
+   other role, which actually clears the server-side session + auth
+   cookie before sending the trainer to the real login page. */
+function signOut(btnEl){
   if(confirm('Sign out of the Trainer Workspace?')){
-    showToast('You have been signed out', '⎋');
-    setTimeout(()=>{ window.location.href = 'index.html'; }, 900);
+    window.EIP.logout({ button: btnEl });
   }
 }
 
