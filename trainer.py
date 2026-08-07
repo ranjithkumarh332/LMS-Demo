@@ -15,7 +15,7 @@ from flask import Blueprint, request, send_file
 from flask_jwt_extended import get_jwt_identity
 
 from quiz_common import (
-    ok, error, role_required, now, to_object_id, serialize,
+    ok, error, role_required, now, to_object_id, serialize, iso_utc,
     VALID_COHORT_TARGETS, ENTRY_LEVEL,
     cohort_counts, record_interview_score_for_cohort,
     log_activity, get_recent_activity,
@@ -534,7 +534,7 @@ def init_trainer(db):
             if "percentage" in overall:
                 overall_scores.append(overall["percentage"])
                 trend_points.append({
-                    "date": att["submittedAt"].isoformat() if att.get("submittedAt") else None,
+                    "date": iso_utc(att.get("submittedAt")),
                     "percentage": overall["percentage"],
                 })
             for section, s in att.get("sectionScores", {}).items():

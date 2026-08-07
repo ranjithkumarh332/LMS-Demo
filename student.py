@@ -32,6 +32,7 @@ from quiz_common import (
     cohort_query_for_target, student_matches_cohort_target,
     log_activity, init_quiz_result_fields, serialize_quiz_result,
     list_quiz_results, compute_overall_performance, top_cohort_label,
+    iso_utc, attendance_summary,
 )
 
 # Manually-authored quizzes (Trainer/Super Admin "Create Quiz" wizard,
@@ -418,8 +419,8 @@ def init_student(db):
             "baselineAssessmentScore": student.get("baselineAssessmentScore"),
             "interviewScore": student.get("interviewScore"),
             "finalEmployabilityScore": student.get("finalEmployabilityScore"),
-            "cohortAssignedAt": student["cohortAssignedAt"].isoformat() if student.get("cohortAssignedAt") else None,
-            "cohortLastUpdated": cohort_record["lastUpdated"].isoformat() if cohort_record and cohort_record.get("lastUpdated") else None,
+            "cohortAssignedAt": iso_utc(student.get("cohortAssignedAt")),
+            "cohortLastUpdated": iso_utc(cohort_record.get("lastUpdated")) if cohort_record else None,
             "cohortSource": cohort_record.get("source") if cohort_record else None,
             # New, backend-computed "Overall Cohort Calculation" fields:
             "overallScore": overall.get("overallScore"),
@@ -536,8 +537,8 @@ def init_student(db):
                 "marksObtained": a.get("overall", {}).get("obtainedMarks"),
                 "totalMarks": a.get("overall", {}).get("totalMarks"),
                 "status": "Completed",
-                "startedAt": a["startedAt"].isoformat() if a.get("startedAt") else None,
-                "submittedAt": a["submittedAt"].isoformat() if a.get("submittedAt") else None,
+                "startedAt": iso_utc(a.get("startedAt")),
+                "submittedAt": iso_utc(a.get("submittedAt")),
             })
         return ok({"results": rows})
 
@@ -587,8 +588,8 @@ def init_student(db):
             "totalQuestions": (attempt.get("overall") or {}).get("total"),
             "marksObtained": (attempt.get("overall") or {}).get("obtainedMarks"),
             "totalMarks": (attempt.get("overall") or {}).get("totalMarks"),
-            "startedAt": attempt["startedAt"].isoformat() if attempt.get("startedAt") else None,
-            "submittedAt": attempt["submittedAt"].isoformat() if attempt.get("submittedAt") else None,
+            "startedAt": iso_utc(attempt.get("startedAt")),
+            "submittedAt": iso_utc(attempt.get("submittedAt")),
             "timeTakenSeconds": attempt.get("timeTakenSeconds"),
             "studentRollNumber": attempt.get("studentRollNumber") or student.get("rollNumber"),
             "studentName": attempt.get("studentName") or student.get("fullName"),
@@ -612,7 +613,7 @@ def init_student(db):
             if "percentage" in overall:
                 overall_scores.append(overall["percentage"])
                 trend_points.append({
-                    "date": att["submittedAt"].isoformat() if att.get("submittedAt") else None,
+                    "date": iso_utc(att.get("submittedAt")),
                     "percentage": overall["percentage"],
                 })
             for section, s in att.get("sectionScores", {}).items():
@@ -708,7 +709,7 @@ def init_student(db):
                     "cohort": cohort,
                 },
                 "assessmentName": assessment.get("name"),
-                "date": attempt["submittedAt"].isoformat() if attempt.get("submittedAt") else None,
+                "date": iso_utc(attempt.get("submittedAt")),
                 "categoryScores": section_scores,
                 "overallScore": overall,
                 "recommendations": recommendations,
@@ -790,8 +791,8 @@ def init_student(db):
             "questionsDisplayed": quiz.get("questionsDisplayed"),
             "totalMarks": _quiz_total_marks(quiz),
             "passingMarks": quiz.get("passingMarks"),
-            "startDateTime": quiz["startDateTime"].isoformat() if quiz.get("startDateTime") else None,
-            "endDateTime": quiz["endDateTime"].isoformat() if quiz.get("endDateTime") else None,
+            "startDateTime": _aware(quiz.get("startDateTime")).isoformat() if quiz.get("startDateTime") else None,
+            "endDateTime": _aware(quiz.get("endDateTime")).isoformat() if quiz.get("endDateTime") else None,
             "status": status,
             "remainingSeconds": remaining_seconds,
             "canStart": status == "live" and not has_submitted,
@@ -1184,7 +1185,7 @@ def init_student(db):
                 "attemptId": str(d["_id"]),
                 "quizId": str(d["quizId"]),
                 "name": d.get("quizTitle") or "Quiz",
-                "date": when.isoformat() if when else None,
+                "date": iso_utc(when),
                 "score": overall.get("percentage") if d.get("status") == "submitted" else None,
                 "marksObtained": overall.get("marksObtained") if d.get("status") == "submitted" else None,
                 "totalMarks": overall.get("totalMarks") if d.get("status") == "submitted" else None,
@@ -1220,5 +1221,21 @@ def init_student(db):
             return error("Student not found.", 404)
         results = list_quiz_results(db, student_id=student["_id"])
         return ok({"results": results})
+
+    # ----------------------------------------------------
+    # ATTENDANCE — live view for the logged-in student.
+    # Attendance is written by the Super Admin (Mark/View Attendance
+    # screens -> db.attendance, one doc per student per class date).
+    # The student page derives percentages on the fly from the shared
+    # attendance_summary() helper (single source of truth) instead of
+    # storing or trusting any pre-aggregated number.
+    # ----------------------------------------------------
+    @bp.route("/attendance", methods=["GET"])
+    @role_required("student")
+    def my_attendance():
+        student = _current_student()
+        if not student:
+            return error("Student not found.", 404)
+        return ok({"attendance": attendance_summary(db, student["_id"])})
 
     return bp

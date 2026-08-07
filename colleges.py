@@ -23,9 +23,19 @@ pre-login registration form) and only ever return status="active" rows.
 ============================================================
 """
 
+import secrets
+import string
+
 from flask import Blueprint, request
 
 from quiz_common import ok, error, role_required, now, to_object_id
+
+
+def _generate_temp_password(length=10):
+    """Cryptographically-random temporary password for admin-triggered
+    trainer credential resets (see admin_reset_trainer_password below)."""
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 # ------------------------------------------------------------
@@ -78,7 +88,7 @@ def department_public(doc):
     }
 
 
-def init_colleges(db):
+def init_colleges(db, bcrypt):
     bp = Blueprint("colleges", __name__)
 
     colleges = db.colleges
@@ -145,6 +155,47 @@ def init_colleges(db):
             return error("College not found.", 404)
         departments.delete_many({"college_id": oid})
         return ok(message="College and its departments deleted.")
+
+    # ==========================================================
+    # SUPER ADMIN — ALL DEPARTMENTS, across every college. Powers the
+    # Department Management page / Department Summary: nothing here is
+    # hardcoded, every department comes straight from db.departments with
+    # its owning college's name joined in, plus a live student headcount.
+    # See also GET /admin/departments/summary in superadmin.py for the
+    # richer version (avg score / placement %) used by the dashboard.
+    # ==========================================================
+    @bp.route("/admin/departments", methods=["GET"])
+    @role_required("super_admin")
+    def admin_list_all_departments():
+        college_names = {c["_id"]: c.get("college_name") for c in colleges.find({}, {"college_name": 1})}
+        docs = list(departments.find({}).sort("department_name", 1))
+
+        rows = []
+        for d in docs:
+            student_count = users.count_documents({
+                "role": "student",
+                "departmentId": d["_id"],
+                "isDeleted": {"$ne": True},
+            })
+            rows.append({
+                "_id": str(d["_id"]),
+                "id": str(d["_id"]),
+                "name": d.get("department_name"),
+                "department_name": d.get("department_name"),
+                "college_id": str(d["college_id"]),
+                "collegeId": str(d["college_id"]),
+                "college": college_names.get(d["college_id"], "—"),
+                "status": d.get("status", "active"),
+                "students": student_count,
+                "created_at": d["created_at"].isoformat() if d.get("created_at") else None,
+            })
+
+        return ok({
+            "departments": rows,
+            "total": len(rows),
+            "totalDepartments": len(rows),
+            "totalColleges": len(college_names),
+        })
 
     # ==========================================================
     # SUPER ADMIN — DEPARTMENT MANAGEMENT (CRUD), scoped to a college
@@ -232,8 +283,11 @@ def init_colleges(db):
     @bp.route("/admin/trainers", methods=["GET"])
     @role_required("super_admin", "trainer")
     def admin_list_trainers():
+        # Includes suspended trainers (not just approved) so a suspended
+        # trainer doesn't silently vanish from the Trainer Verification /
+        # Trainer Profile views — see admin_set_trainer_status below.
         docs = users.find(
-            {"role": "trainer", "approvalStatus": "approved"}
+            {"role": "trainer", "approvalStatus": {"$in": ["approved", "suspended"]}}
         ).sort("fullName", 1)
 
         def _trainer_public(d):
@@ -251,10 +305,77 @@ def init_colleges(db):
                 "email": d.get("email"),
                 "college": d.get("college"),
                 "department": d.get("department"),
-                "status": "active",
+                "status": "suspended" if d.get("approvalStatus") == "suspended" else "active",
             }
 
         return ok({"trainers": [_trainer_public(d) for d in docs]})
+
+    # ==========================================================
+    # SUPER ADMIN — suspend / reactivate a trainer account.
+    # Reuses the existing approvalStatus field (same field driving
+    # pending/approved/rejected) rather than adding a new column —
+    # login() already blocks any non-"approved" status with "Your
+    # account is not active. Contact the administrator.", so setting
+    # approvalStatus="suspended" immediately (and correctly) blocks
+    # login with zero changes needed in login.py. Clearing
+    # currentSessionId also invalidates any session already in progress.
+    # ==========================================================
+    @bp.route("/admin/trainers/<user_id>/status", methods=["PATCH"])
+    @role_required("super_admin")
+    def admin_set_trainer_status(user_id):
+        oid = to_object_id(user_id)
+        if not oid:
+            return error("Invalid user id.", 404)
+        trainer = users.find_one({"_id": oid, "role": "trainer"})
+        if not trainer:
+            return error("Trainer not found.", 404)
+        if trainer.get("approvalStatus") not in ("approved", "suspended"):
+            return error("Only approved trainers can be suspended or activated.")
+
+        data = request.get_json(silent=True) or {}
+        requested = data.get("status")
+        if requested not in ("active", "suspended"):
+            return error("status must be 'active' or 'suspended'.")
+
+        new_approval_status = "suspended" if requested == "suspended" else "approved"
+        update = {"approvalStatus": new_approval_status, "updatedAt": now()}
+        if new_approval_status == "suspended":
+            update["currentSessionId"] = None
+        users.update_one({"_id": oid}, {"$set": update})
+        return ok(message=f"Trainer {requested}.")
+
+    # ==========================================================
+    # SUPER ADMIN — reset a trainer's login credentials.
+    # Generates a new random temporary password server-side (never
+    # accepted from the client), hashes it the same way register()/
+    # reset_password() do, and returns it once in the response so the
+    # Super Admin can hand it to the trainer securely. Also ends any
+    # session currently in progress.
+    # ==========================================================
+    @bp.route("/admin/trainers/<user_id>/reset-password", methods=["POST"])
+    @role_required("super_admin")
+    def admin_reset_trainer_password(user_id):
+        oid = to_object_id(user_id)
+        if not oid:
+            return error("Invalid user id.", 404)
+        trainer = users.find_one({"_id": oid, "role": "trainer"})
+        if not trainer:
+            return error("Trainer not found.", 404)
+
+        temp_password = _generate_temp_password()
+        password_hash = bcrypt.generate_password_hash(temp_password).decode("utf-8")
+        users.update_one(
+            {"_id": oid},
+            {"$set": {
+                "passwordHash": password_hash,
+                "currentSessionId": None,
+                "updatedAt": now(),
+            }},
+        )
+        return ok(
+            {"temporaryPassword": temp_password},
+            message="Trainer credentials reset.",
+        )
 
     # ==========================================================
     # SUPER ADMIN — assign college/department to an approved Trainer.

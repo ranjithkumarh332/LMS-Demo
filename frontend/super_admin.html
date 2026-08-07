@@ -374,6 +374,12 @@ table.data-table{ width:100%; border-collapse:collapse; font-size:13.5px; min-wi
 .form-group input:focus, .form-group select:focus, .form-group textarea:focus{ outline:none; border-color:var(--teal); box-shadow:0 0 0 3px rgba(31,158,147,0.14); }
 .form-group.full{ grid-column:1/-1; }
 @media (max-width:640px){ .form-panel{ grid-template-columns:1fr; } }
+/* Placement Rules (and any other form panel that should use the full
+   content width instead of the default 2-col/640px form layout) —
+   same cards/spacing/colors, just more columns on wide screens. */
+.form-panel.form-panel-wide{ grid-template-columns:repeat(3,1fr); }
+@media (max-width:900px){ .form-panel.form-panel-wide{ grid-template-columns:repeat(2,1fr); } }
+@media (max-width:640px){ .form-panel.form-panel-wide{ grid-template-columns:1fr; } }
 
 .toast-container{ position:fixed; bottom:22px; right:22px; z-index:1000; display:flex; flex-direction:column; gap:10px; align-items:flex-end; }
 .toast{ background:var(--ink); color:#EEF0F6; padding:13px 18px; border-radius:12px; font-size:13.5px; display:flex; align-items:center; gap:10px; box-shadow:var(--shadow-lg); animation:toastIn .35s cubic-bezier(.22,1,.36,1); max-width:320px; }
@@ -556,6 +562,12 @@ table.data-table{ width:100%; border-collapse:collapse; font-size:13.5px; min-wi
 .sa-att-btn.on[data-state="present"]{ background:var(--teal); color:#fff; border-color:var(--teal); }
 .sa-att-btn.on[data-state="absent"]{ background:var(--rose); color:#fff; border-color:var(--rose); }
 .sa-att-btn.on[data-state="late"]{ background:var(--amber); color:#1B1300; border-color:var(--amber); }
+.att-status{ display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; padding:4px 10px; border-radius:100px; letter-spacing:.01em; white-space:nowrap; }
+.att-status::before{ content:''; width:7px; height:7px; border-radius:50%; background:currentColor; flex:none; }
+.att-present{ background:rgba(31,158,147,0.14); color:var(--teal-dark); }
+.att-absent{ background:rgba(228,87,61,0.14); color:var(--rose); }
+.att-notmarked{ background:var(--paper-sunk); color:var(--text-soft); }
+.att-filter-panel{ overflow:visible; }
 .sa-college-check-list{ display:flex; flex-direction:column; gap:10px; max-height:280px; overflow-y:auto; }
 .sa-college-check-row{ display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--line); border-radius:var(--radius-sm); }
 .sa-college-check-row input{ width:16px; height:16px; }
@@ -861,7 +873,7 @@ async function loadTrainerQueue(){
   if(!res.ok) return;
   TRAINER_APPLICATIONS = (res.data.pending||[]).map(u=>({
     id:u.id, name:u.fullName||'—', email:u.email||'—', phone:u.mobile||'—',
-    dept:'—', colleges:[u.college||'—'], date:fmtRegDate(u.createdAt), docs:'—', status:u.approvalStatus,
+    dept:'—', date:fmtRegDate(u.createdAt), docs:'—', status:u.approvalStatus,
   }));
 }
 async function loadStudentQueue(){
@@ -1029,10 +1041,32 @@ async function loadColleges(){
   const arr = res.ok ? pickArray(res.data, 'colleges') : null;
   if(arr) COLLEGES = arr;
 }
+// Real departments across every college — GET /api/admin/departments
+// (colleges.py). Replaces the old call to a nonexistent '/departments'
+// endpoint, which is why the Department Management page always rendered
+// empty before. `students` is a live headcount per department; avgScore/
+// placement/improvement/completed aren't available from this endpoint yet
+// (see superadmin.py's GET /admin/departments/summary for the richer
+// avg-score/placement version) so they default to 0 rather than showing
+// "undefined" wherever the Dashboard's Department Ranking widget reads them.
+let DEPARTMENTS_META = { total: 0, totalColleges: 0 };
 async function loadDepartments(){
-  const res = await platformApiGet('/departments');
+  const res = await platformApiGet('/admin/departments');
   const arr = res.ok ? pickArray(res.data, 'departments') : null;
-  if(arr) DEPARTMENTS = arr;
+  if(arr){
+    DEPARTMENTS = arr.map(d => ({
+      id: d.id || d._id,
+      name: d.name || d.department_name,
+      college: d.college || '—',
+      students: d.students || 0,
+      status: d.status || 'active',
+      avgScore: 0, placement: 0, improvement: 0, completed: 0,
+    }));
+    DEPARTMENTS_META = {
+      total: res.data.total ?? res.data.totalDepartments ?? DEPARTMENTS.length,
+      totalColleges: res.data.totalColleges ?? 0,
+    };
+  }
 }
 // The REAL college/department source of truth (db.colleges / db.departments),
 // used by the "Add College" module on the College Management page and by
@@ -1067,6 +1101,7 @@ async function loadTrainers(){
     TRAINERS = arr.map(t => ({
       id: t.id || t._id,
       name: t.name || t.fullName || '—',
+      email: t.email || '—',
       dept: t.department || '—',
       colleges: t.college ? [t.college] : [],
       sessions: 0,
@@ -1206,11 +1241,6 @@ async function loadWorkshopSessions(){
   const arr = res.ok ? pickArray(res.data, 'sessions') : null;
   if(arr) WORKSHOP_SESSIONS = arr;
 }
-async function loadAttendanceRecords(){
-  const res = await platformApiGet('/attendance/records');
-  const arr = res.ok ? pickArray(res.data, 'records') : null;
-  if(arr) ATTENDANCE_RECORDS = arr;
-}
 async function loadAuditLogs(){
   const res = await platformApiGet('/audit-logs');
   const arr = res.ok ? pickArray(res.data, 'logs') : null;
@@ -1284,6 +1314,14 @@ async function loadSessions(){
 // Placeholder endpoint until the Student/Trainer/College Admin session
 // tracking is wired up server-side — see requirement to keep this
 // backend-ready rather than hardcoded. Silently keeps 0s if unavailable.
+// Loads the real, currently-configured Cohort Rules (score bands that
+// classify students into Cohort A/B/C) from the database. Powers the
+// Placement Rules page — nothing there is hardcoded once this has run.
+async function loadPlacementRules(){
+  const res = await platformApiGet('/admin/placement-rules');
+  const rules = res.ok ? (res.data.placementRules || res.data.placement_rules) : null;
+  if(rules) PLACEMENT_RULES = rules;
+}
 async function loadLiveStats(){
   const res = await platformApiGet('/dashboard/live-stats');
   if(res.ok && res.data){
@@ -1307,13 +1345,12 @@ async function loadPlatformData(){
     loadQuestionBanks(), loadAssessmentTemplates(), loadInterventionsSummary(),
     loadQuizzes(), loadQuizResponses(), loadQuizAnalytics(), loadQuizResponsesFilterOptions(),
     loadQuizResultsAdmin(), loadQuizInterviewVerificationAdmin(), loadQuizValidationVerificationAdmin(),
-    loadWorkshopSessions(), loadAttendanceRecords(), loadAuditLogs(),
+    loadWorkshopSessions(), loadAuditLogs(),
     loadPlacementTrend(), loadDeptDistribution(), loadRecentActivity(),
     loadActionRequired(), loadAnnouncements(), loadUpcomingDrives(),
     loadKpis(), loadStudentDistribution(), loadProfile(), loadLiveStats(),
-    loadSessions(), loadManagedColleges(),
+    loadSessions(), loadManagedColleges(), loadUsersAdmin(), loadPlacementRules(),
   ]);
-  buildUsersList();
   renderPage();
 }
 
@@ -1380,14 +1417,46 @@ let STUDENTS = [];
 // no separate mock/localStorage copies anymore.
 let STUDENT_VERIFICATION_QUEUE = [];
 
-// Derived from STUDENTS/TRAINERS/COLLEGES once those load from the backend — see buildUsersList().
+// Real, backend-driven user list for User Management — GET /api/admin/users
+// (superadmin.py). Students, Trainers and College Admins all come straight
+// from db.users; nothing here is derived/mocked from STUDENTS/TRAINERS/
+// COLLEGES anymore (that used to fabricate trainer emails as
+// "firstname.lastname@trainer.edu" and hardcode status/lastLogin — see
+// CHANGELOG). Status + free-text Search are resolved server-side; the
+// User Type tabs still slice this same result client-side by role so tab
+// counts don't require three separate round-trips.
+const ROLE_API_TO_LABEL = { student:'Student', trainer:'Trainer', college_admin:'College Admin' };
+function formatLastLogin(iso){
+  if(!iso) return '-';
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return '-';
+  return d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}) + ' ' +
+         d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+}
 let USERS = [];
-function buildUsersList(){
-  USERS = [
-    ...STUDENTS.map(s=>({ id:s.id, name:s.name, email:s.email, role:'Student', college:s.college, status:'active', lastLogin:'Today' })),
-    ...TRAINERS.map(t=>({ id:t.id, name:t.name, email:t.name.toLowerCase().replace(/ /g,'.')+'@trainer.edu', role:'Trainer', college:t.college, status:'active', lastLogin:'Today' })),
-    ...COLLEGES.filter(c=>c.status!=='pending').map(c=>({ id:'a-'+c.id, name:c.adminName, email:c.email, role:'College Admin', college:c.name, status:c.status==='suspended'?'suspended':'active', lastLogin:c.lastLogin })),
-  ];
+async function loadUsersAdmin(){
+  const qs = new URLSearchParams({
+    status: STATE.filters.userStatus || 'all',
+    search: STATE.filters.userSearch || '',
+  });
+  const res = await platformApiGet('/admin/users?' + qs.toString());
+  const arr = res.ok ? pickArray(res.data, 'users') : null;
+  if(arr){
+    USERS = arr.map(u => ({
+      id: u.id,
+      name: u.name || '—',
+      email: u.email || '—',
+      role: ROLE_API_TO_LABEL[u.role] || u.role,
+      college: u.college || null,
+      department: u.department || null,
+      rollNumber: u.rollNumber || null,
+      employeeId: u.employeeId || null,
+      status: u.status === 'inactive' ? 'inactive' : 'active',
+      lastLogin: formatLastLogin(u.lastLogin),
+    }));
+  } else if(typeof showToast==='function' && res.status){
+    showToast(res.data?.message || 'Could not load users.', true);
+  }
 }
 
 // Loaded live from GET /api/assessments/question-banks — see loadPlatformData().
@@ -1418,14 +1487,6 @@ let QUIZ_ANALYTICS = { studentsAttempted:0, studentsYetToAttempt:0, averageScore
 ============================================================ */
 // Loaded live from GET /api/interventions/sessions — see loadPlatformData().
 let WORKSHOP_SESSIONS = [];
-
-/* ============================================================
-   ATTENDANCE OVERSIGHT — Super Admin can mark attendance and
-   view every record marked by trainers, across colleges.
-============================================================ */
-// Loaded live from GET /api/attendance/records — see loadPlatformData().
-let ATTENDANCE_RECORDS = [];
-let ATT_MARK_STATE = {};
 
 // Loaded live from GET /api/audit-logs — see loadPlatformData().
 let AUDIT_LOGS = [];
@@ -1791,6 +1852,7 @@ function statusChip(status){
   const map = {
     ready:['chip-ready','Placement Ready'], near:['chip-warn','Near Ready'], risk:['chip-risk','High Risk'],
     active:['chip-ready','Active'], pending:['chip-warn','Pending'], suspended:['chip-risk','Suspended'],
+    inactive:['chip-risk','Inactive'],
     'under review':['chip-warn','Under Review'], 'changes requested':['chip-risk','Changes Requested'],
     published:['chip-ready','Published'], draft:['chip-neutral','Draft'], archived:['chip-archived','Archived'],
     scheduled:['chip-scheduled','Scheduled'], live:['chip-ready','Live'], completed:['chip-completed','Completed'],
@@ -1874,6 +1936,8 @@ const PAGE_META = {
   users:{ title:'User Management', crumb:'People' },
   'student-verification':{ title:'Student Verification', crumb:'Students' },
   attendance:{ title:'Attendance', crumb:'Students' },
+  'attendance-mark':{ title:'Mark Attendance', crumb:'Students / Attendance' },
+  'attendance-records':{ title:'Attendance Records', crumb:'Students / Attendance' },
   assessments:{ title:'Assessment Management', crumb:'Learning' },
   'placement-rules':{ title:'Placement Readiness Rules', crumb:'Learning' },
   interventions:{ title:'Intervention Management', crumb:'Learning' },
@@ -1953,8 +2017,10 @@ function updateProfileChip(){
   chip.innerHTML = `${avatarChip(SUPER_ADMIN_PROFILE.name)}<div class="who"><b>${esc(SUPER_ADMIN_PROFILE.name)}</b><span>${esc(SUPER_ADMIN_PROFILE.role)}</span></div>`;
 }
 function updateSidebarActive(){
+  const subPages = { 'attendance-mark':'attendance', 'attendance-records':'attendance' };
   document.querySelectorAll('.side-link').forEach(a=>{
-    a.classList.toggle('active', a.dataset.page===STATE.page || (STATE.page==='college-profile' && a.dataset.page==='colleges') || (STATE.page==='student-profile' && a.dataset.page==='colleges') || (STATE.page==='trainer-profile' && a.dataset.page==='trainer-verification'));
+    const target = subPages[STATE.page] || STATE.page;
+    a.classList.toggle('active', a.dataset.page===target || (target==='college-profile' && a.dataset.page==='colleges') || (target==='student-profile' && a.dataset.page==='colleges') || (target==='trainer-profile' && a.dataset.page==='trainer-verification'));
     a.setAttribute('aria-current', a.classList.contains('active') ? 'page' : 'false');
   });
 }
@@ -1976,6 +2042,8 @@ function renderPage(){
     'trainer-verification': pageTrainerVerification, 'trainer-profile': ()=>pageTrainerProfile(STATE.params.id),
     'student-verification': pageStudentVerification,
     attendance: pageAttendance,
+    'attendance-mark': pageAttendanceMark,
+    'attendance-records': pageAttendanceView,
   };
   const fn = fns[STATE.page] || pageDashboard;
   root.innerHTML = `<div class="page active">${fn()}</div>`;
@@ -2051,6 +2119,12 @@ function overviewInfographic(k, style){
 
 // Loaded live from GET /api/dashboard/student-distribution — see loadPlatformData().
 let STUDENT_DIST = [];
+// Real Placement Rules doc from db.placement_rules (superadmin.py's
+// GET /placement-rules) — placementReadyThreshold / nearReadyThreshold /
+// highRiskThreshold are the actual "Cohort Rules"
+// config (min score -> cohort letter) the Super Admin edits on the
+// Placement Rules page. Never hardcoded; always reloaded after a save.
+let PLACEMENT_RULES = { placementReadyThreshold: 75, nearReadyThreshold: 50, highRiskThreshold: 50, assessmentWeight: 50, interviewWeight: 50 };
 function statStripItem(label, value, icon, tone){
   return `<div class="stat-strip-item">
     <div class="ssi-text"><span>${label}</span><b>${value}</b></div>
@@ -2307,21 +2381,15 @@ function pageVerification(){
    PAGE: TRAINER VERIFICATION
 ============================================================ */
 function pageTrainerVerification(){
-  const tab = STATE.tab.trainers;
   const pending = TRAINER_APPLICATIONS.filter(t=>t.status==='pending');
   return `
   <div class="page-head">
-    <div><p class="desc">Trainers register and stay in Pending Verification until a Super Admin reviews them. Approved trainers can be assigned to one or more colleges.</p></div>
+    <div><p class="desc">Trainers register and stay in Pending Verification until a Super Admin reviews them.</p></div>
     <div class="page-actions"><button class="btn btn-ghost btn-sm" data-action="download-report" data-name="Trainer Verification Queue">${ic('download','icon icon-sm')}Export</button></div>
   </div>
-  <div class="tabs">
-    <button class="tab-btn ${tab==='pending'?'active':''}" data-action="tab" data-group="trainers" data-value="pending">Pending Requests <span class="mono" style="margin-left:6px;">${pending.length}</span></button>
-    <button class="tab-btn ${tab==='all'?'active':''}" data-action="tab" data-group="trainers" data-value="all">All Trainers <span class="mono" style="margin-left:6px;">${TRAINERS.length}</span></button>
-  </div>
-  ${tab==='pending' ? `
   <div class="panel">
     <div class="panel-body pad-0"><div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Trainer</th><th>Email</th><th>Phone</th><th>Department</th><th>Requested Colleges</th><th>Registered</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Trainer</th><th>Email</th><th>Phone</th><th>Department</th><th>Registered</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody>
         ${pending.length ? pending.map(t=>`
         <tr>
@@ -2329,7 +2397,6 @@ function pageTrainerVerification(){
           <td class="mono">${t.email}</td>
           <td class="mono">${t.phone}</td>
           <td>${t.dept}</td>
-          <td>${t.colleges.map(c=>`<span class="chip chip-neutral" style="margin:2px 4px 2px 0;">${c}</span>`).join('')}</td>
           <td>${t.date}</td>
           <td>${statusChip(t.status)}</td>
           <td class="td-actions">
@@ -2337,34 +2404,10 @@ function pageTrainerVerification(){
             <button class="btn btn-teal btn-xs" data-action="trainer-approve" data-id="${t.id}">Approve</button>
             <button class="btn btn-danger btn-xs" data-action="trainer-reject" data-id="${t.id}">Reject</button>
           </td>
-        </tr>`).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:28px;">No pending trainer requests.</td></tr>`}
+        </tr>`).join('') : `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:28px;">No pending trainer requests.</td></tr>`}
       </tbody>
     </table></div></div>
-  </div>` : `
-  <div class="toolbar"><div class="search-box"><span>${ic('search','icon icon-sm')}</span><input type="text" placeholder="Search trainers…" id="trainerSearch"></div>
-    <select id="trainerStatusFilter"><option value="all">All Status</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="inactive">Inactive</option></select>
-  </div>
-  <div class="panel">
-    <div class="panel-body pad-0"><div class="table-wrap"><table class="data-table" id="trainerTable">
-      <thead><tr><th>Trainer</th><th>Department</th><th>Colleges</th><th>Sessions</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody>
-        ${TRAINERS.map(t=>`
-        <tr data-search="${esc((t.name+' '+t.dept).toLowerCase())}" data-status="${t.status}">
-          <td class="row-title" style="cursor:pointer;" data-action="nav" data-page="trainer-profile" data-id="${t.id}">${avatarChip(t.name,26)} <span style="margin-left:8px;">${t.name}</span></td>
-          <td>${t.dept}</td>
-          <td>${t.colleges.map(c=>`<span class="chip chip-neutral" style="margin:2px 4px 2px 0;">${c.split(' ')[0]}</span>`).join('')}</td>
-          <td class="mono">${t.sessions}</td>
-          <td>${statusChip(t.status==='active'?'active':t.status==='suspended'?'suspended':'pending')}</td>
-          <td class="td-actions">
-            <button class="btn btn-ghost btn-xs" data-action="nav" data-page="trainer-profile" data-id="${t.id}">${ic('eye','icon icon-sm')}View</button>
-            <button class="btn btn-ghost btn-xs" data-action="manage-trainer-colleges" data-id="${t.id}">${ic('building','icon icon-sm')}Colleges</button>
-            <button class="btn btn-ghost btn-xs" data-action="${t.status==='suspended'?'trainer-activate':'trainer-suspend'}" data-id="${t.id}">${t.status==='suspended'?'Activate':'Suspend'}</button>
-            <button class="btn btn-ghost btn-xs" data-action="${t.status==='inactive'?'trainer-set-active':'trainer-set-inactive'}" data-id="${t.id}">${t.status==='inactive'?'Mark Active':'Mark Inactive'}</button>
-          </td>
-        </tr>`).join('')}
-      </tbody>
-    </table></div></div>
-  </div>`}`;
+  </div>`;
 }
 
 /* ============================================================
@@ -2412,7 +2455,7 @@ function pageTrainerProfile(id){
   const t = TRAINERS.find(x=>x.id===id);
   if(!t) return `<p>Trainer not found.</p>`;
   const trainerQuizzes = QUIZZES.filter(q=>q.trainer===t.name);
-  const trainerSessions = WORKSHOP_SESSIONS.filter(w=>w.trainer===t.name);
+  const trainerSessions = WORKSHOP_SESSIONS.filter(w=>(w.trainers||[]).includes(t.name) || w.trainer===t.name);
   return `
   <a href="#" class="back-link" data-action="nav" data-page="trainer-verification">${ic('chevLeft','icon icon-sm')}Back to Trainer Verification</a>
   <div class="page-head">
@@ -2422,6 +2465,7 @@ function pageTrainerProfile(id){
     </div>
     <div class="page-actions">
       <button class="btn btn-ghost btn-sm" data-action="manage-trainer-colleges" data-id="${t.id}">${ic('building','icon icon-sm')}Manage Colleges</button>
+      <button class="btn btn-ghost btn-sm" data-action="trainer-reset" data-id="${t.id}">${ic('key','icon icon-sm')}Reset</button>
       <button class="btn ${t.status==='suspended'?'btn-teal':'btn-danger'} btn-sm" data-action="${t.status==='suspended'?'trainer-activate':'trainer-suspend'}" data-id="${t.id}">${t.status==='suspended'?'Activate':'Suspend'}</button>
     </div>
   </div>
@@ -2449,7 +2493,7 @@ function pageTrainerProfile(id){
       <div class="panel-bar"><span class="panel-dot pd-1"></span><span class="panel-dot pd-2"></span><span class="panel-dot pd-3"></span><span class="panel-title">sessions scheduled</span></div>
       <div class="panel-body pad-0"><div class="table-wrap"><table class="data-table">
         <thead><tr><th>Session</th><th>College</th><th>Status</th></tr></thead>
-        <tbody>${trainerSessions.length?trainerSessions.map(w=>`<tr><td class="row-title">${w.name}</td><td>${w.college}</td><td>${statusChip(w.status==='scheduled'?'published':w.status==='completed'?'completed':'draft')}</td></tr>`).join(''):'<tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:20px;">No sessions yet</td></tr>'}</tbody>
+        <tbody>${trainerSessions.length?trainerSessions.map(w=>`<tr><td class="row-title">${esc(w.name)}</td><td>${esc((w.colleges||[]).join(', ')||w.college||'—')}</td><td>${statusChip(w.status==='scheduled'?'published':w.status==='completed'?'completed':'draft')}</td></tr>`).join(''):'<tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:20px;">No sessions yet</td></tr>'}</tbody>
       </table></div></div>
     </div>
   </div>`;
@@ -2846,9 +2890,11 @@ function pageStudentProfile(id){
    PAGE: DEPARTMENT MANAGEMENT
 ============================================================ */
 function pageDepartments(){
+  const totalDepts = DEPARTMENTS_META.total || DEPARTMENTS.length;
+  const totalColleges = DEPARTMENTS_META.totalColleges || new Set(DEPARTMENTS.map(d=>d.college)).size;
   return `
   <div class="page-head">
-    <div><p class="desc">Changes here reflect immediately across every affiliated college.</p></div>
+    <div><p class="desc"><strong>${totalDepts}</strong> department${totalDepts===1?'':'s'} across <strong>${totalColleges}</strong> college${totalColleges===1?'':'s'}. Changes here reflect immediately across every affiliated college.</p></div>
     <div class="page-actions">
       <button class="btn btn-ghost btn-sm" data-action="download-report" data-name="Department Directory">${ic('download','icon icon-sm')}Export</button>
     </div>
@@ -2858,18 +2904,17 @@ function pageDepartments(){
     <select class="select-field"><option>All colleges</option>${[...new Set(DEPARTMENTS.map(d=>d.college))].map(c=>`<option>${c}</option>`).join('')}</select>
   </div>
   <div class="panel"><div class="panel-body pad-0"><div class="table-wrap"><table class="data-table" id="deptTable">
-    <thead><tr><th>Department</th><th>College</th><th>Students</th><th>Avg Score</th><th>Placement %</th><th>Status</th><th>Actions</th></tr></thead>
-    <tbody>${DEPARTMENTS.map((d,i)=>`
+    <thead><tr><th>Department</th><th>College</th><th>Students</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>${DEPARTMENTS.length ? DEPARTMENTS.map((d,i)=>`
       <tr data-search="${esc((d.name+' '+d.college).toLowerCase())}">
         <td class="row-title">${d.name}</td><td>${d.college}</td><td class="mono">${d.students}</td>
-        <td class="mono">${d.avgScore}</td><td class="mono">${d.placement}%</td>
-        <td>${statusChip('active')}</td>
+        <td>${statusChip(d.status)}</td>
         <td class="td-actions">
-          <button class="btn-icon" style="width:30px;height:30px;" data-action="edit-department" data-idx="${i}">${ic('edit','icon icon-sm')}</button>
-          <button class="btn-icon" style="width:30px;height:30px;" data-action="toggle-department" data-idx="${i}">${ic('pause','icon icon-sm')}</button>
-          <button class="btn-icon" style="width:30px;height:30px;" data-action="delete-department" data-idx="${i}">${ic('trash','icon icon-sm')}</button>
+          <button class="btn-icon" style="width:30px;height:30px;" data-action="edit-department" data-idx="${i}" title="Edit">${ic('edit','icon icon-sm')}</button>
+          <button class="btn-icon" style="width:30px;height:30px;" data-action="toggle-department" data-idx="${i}" title="${d.status==='inactive'?'Activate':'Deactivate'}">${ic('pause','icon icon-sm')}</button>
+          <button class="btn-icon" style="width:30px;height:30px;" data-action="delete-department" data-idx="${i}" title="Delete">${ic('trash','icon icon-sm')}</button>
         </td>
-      </tr>`).join('')}</tbody>
+      </tr>`).join('') : `<tr><td colspan="5"><div class="empty-state">No departments on record.</div></td></tr>`}</tbody>
   </table></div></div></div>`;
 }
 
@@ -2880,28 +2925,37 @@ function pageUsers(){
   const roles = ['Student','Trainer','College Admin'];
   const active = STATE.tab.users;
   const list = USERS.filter(u=>u.role===active);
+  // Trainers aren't directly associated with a single college on this
+  // platform (see colleges.py), so the College column only makes sense
+  // for Student / College Admin rows.
+  const showCollege = active !== 'Trainer';
+  const colCount = showCollege ? 6 : 5;
   return `
   <div class="page-head">
     <div><p class="desc">Manage every account on the platform. Duplicate emails and duplicate role assignments are automatically prevented.</p></div>
     <div class="page-actions"><button class="btn btn-accent btn-sm" data-action="open-status-by-email">${ic('key','icon icon-sm')}Activate/Deactivate by Email</button></div>
   </div>
-  <div class="tabs">${roles.map(r=>`<button class="tab-btn ${active===r?'active':''}" data-action="tab" data-group="users" data-value="${r}">${r}s${r==='College Admin'||r==='Super Admin'?'':''}<span style="margin-left:6px;" class="mono">${USERS.filter(u=>u.role===r).length}</span></button>`).join('')}</div>
+  <div class="tabs">${roles.map(r=>`<button class="tab-btn ${active===r?'active':''}" data-action="tab" data-group="users" data-value="${r}">${r}s<span style="margin-left:6px;" class="mono">${USERS.filter(u=>u.role===r).length}</span></button>`).join('')}</div>
   <div class="toolbar">
-    <div class="search-box"><span>${ic('search','icon icon-sm')}</span><input type="text" placeholder="Search by name or email…" id="userSearch"></div>
-    <select class="select-field" id="userStatusFilter"><option value="">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option></select>
+    <div class="search-box"><span>${ic('search','icon icon-sm')}</span><input type="text" placeholder="Search by name, email, roll no. or employee id…" id="userSearch" value="${esc(STATE.filters.userSearch||'')}"></div>
+    <select class="select-field" id="userStatusFilter">
+      <option value="" ${!STATE.filters.userStatus?'selected':''}>All statuses</option>
+      <option value="active" ${STATE.filters.userStatus==='active'?'selected':''}>Active</option>
+      <option value="inactive" ${STATE.filters.userStatus==='inactive'?'selected':''}>Inactive</option>
+    </select>
   </div>
   <div class="panel"><div class="panel-body pad-0"><div class="table-wrap"><table class="data-table" id="userTable">
-    <thead><tr><th>Name</th><th>Email</th><th>College</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Name</th><th>Email</th>${showCollege?'<th>College</th>':''}<th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
     <tbody>${list.map(u=>`
       <tr data-search="${esc((u.name+' '+u.email).toLowerCase())}" data-status="${u.status}">
         <td style="display:flex;align-items:center;gap:10px;">${avatarChip(u.name,28)}<span class="row-title">${u.name}</span></td>
-        <td class="mono">${u.email}</td><td>${u.college}</td><td>${statusChip(u.status)}</td><td class="mono">${u.lastLogin}</td>
+        <td class="mono">${u.email}</td>${showCollege?`<td>${u.college||'—'}</td>`:''}<td>${statusChip(u.status)}</td><td class="mono">${u.lastLogin}</td>
         <td class="td-actions">
           <button class="btn btn-ghost btn-xs" data-action="reset-password" data-id="${u.id}">${ic('key','icon icon-sm')}Reset</button>
-          <button class="btn btn-ghost btn-xs" data-action="${u.status==='suspended'?'activate-user':'suspend-user'}" data-id="${u.id}">${u.status==='suspended'?'Activate':'Suspend'}</button>
+          <button class="btn btn-ghost btn-xs" data-action="${u.status==='inactive'?'activate-user':'suspend-user'}" data-id="${u.id}">${u.status==='inactive'?'Activate':'Deactivate'}</button>
           <button class="btn btn-ghost btn-xs" data-action="delete-user" data-id="${u.id}">${ic('trash','icon icon-sm')}</button>
         </td>
-      </tr>`).join('') || `<tr><td colspan="6"><div class="empty-state">No users in this role yet.</div></td></tr>`}</tbody>
+      </tr>`).join('') || `<tr><td colspan="${colCount}"><div class="empty-state">No users in this role yet.</div></td></tr>`}</tbody>
   </table></div></div></div>`;
 }
 
@@ -2909,68 +2963,371 @@ function pageUsers(){
    PAGE: ASSESSMENT MANAGEMENT
 ============================================================ */
 /* ============================================================
-   PAGE: ATTENDANCE OVERSIGHT — Super Admin can mark attendance
-   directly and view every record marked by trainers.
+   PAGE: ATTENDANCE — completely database-driven redesign.
+   The landing page shows two cards only (Mark Attendance /
+   View Records); each opens its own full-page screen. No student
+   rows ever load until "Fetch Records" is clicked, and every
+   dropdown (College / Department / Cohort / Trainer) is populated
+   from GET /api/admin/attendance/filters — nothing is hardcoded.
 ============================================================ */
 function pageAttendance(){
-  const tab = STATE.tab.attendance;
   return `
   <div class="page-head">
-    <div><p class="desc">Mark attendance directly, or review every attendance record trainers have marked across colleges.</p></div>
-    <div class="page-actions"><button class="btn btn-ghost btn-sm" data-action="download-report" data-name="Attendance Export">${ic('download','icon icon-sm')}Export</button></div>
+    <div><p class="desc">Manage and review student attendance across all colleges.</p></div>
   </div>
-  <div class="tabs">
-    <button class="tab-btn ${tab==='mark'?'active':''}" data-action="tab" data-group="attendance" data-value="mark">Mark Attendance</button>
-    <button class="tab-btn ${tab==='view'?'active':''}" data-action="tab" data-group="attendance" data-value="view">View Records</button>
-  </div>
-  ${tab==='mark'?pageAttendanceMark():pageAttendanceView()}`;
+  <div class="card-grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,320px));max-width:720px;">
+    <div class="entity-card" data-action="att-go-mark" style="cursor:pointer;">
+      <div class="entity-card-top">
+        <div class="entity-logo" style="background:linear-gradient(135deg,var(--teal),var(--ink));">${ic('check')}</div>
+        <div><h4>Attendance</h4><p>Manage and mark student attendance.</p></div>
+      </div>
+      <div class="entity-card-foot">
+        <button class="btn btn-accent btn-sm">Mark Attendance</button>
+      </div>
+    </div>
+    <div class="entity-card" data-action="att-go-records" style="cursor:pointer;">
+      <div class="entity-card-top">
+        <div class="entity-logo" style="background:linear-gradient(135deg,var(--amber),var(--rose));">${ic('fileText')}</div>
+        <div><h4>Attendance Records</h4><p>View previously marked attendance.</p></div>
+      </div>
+      <div class="entity-card-foot">
+        <button class="btn btn-accent btn-sm">View Records</button>
+      </div>
+    </div>
+  </div>`;
 }
 
+/* ---- Shared attendance state + multi-select config ---- */
+function attTodayISO(){
+  const d = new Date();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return d.getFullYear()+'-'+mm+'-'+dd;
+}
+let ATT_FILTERS = { loaded:false, colleges:[], departments:[], cohorts:[], trainers:[] };
+let ATT_MARK = { collegeIds:['all'], departmentIds:['all'], cohorts:['all'], deptOptions:[], date:attTodayISO(), students:[], marks:{}, fetched:false };
+let ATT_VIEW = { collegeIds:['all'], departmentIds:['all'], trainerIds:['all'], deptOptions:[], trainerOptions:[], date:attTodayISO(), records:[], summary:null, loaded:false };
+const ATT_MS_CONFIG = {
+  attMarkColleges:{ kind:'mark', field:'collegeIds', label:'College', allLabel:'All Colleges', options:()=>ATT_FILTERS.colleges.map(c=>({value:c.id,label:c.name})) },
+  attMarkDepts:{ kind:'mark', field:'departmentIds', label:'Department', allLabel:'All Departments', options:()=>ATT_MARK.deptOptions },
+  attMarkCohorts:{ kind:'mark', field:'cohorts', label:'Applicable Cohorts', allLabel:'All Cohorts', options:()=>ATT_FILTERS.cohorts },
+  attViewColleges:{ kind:'view', field:'collegeIds', label:'College', allLabel:'All Colleges', options:()=>ATT_FILTERS.colleges.map(c=>({value:c.id,label:c.name})) },
+  attViewDepts:{ kind:'view', field:'departmentIds', label:'Department', allLabel:'All Departments', options:()=>ATT_VIEW.deptOptions },
+  attViewTrainers:{ kind:'view', field:'trainerIds', label:'Trainer', allLabel:'All Trainers', options:()=>ATT_VIEW.trainerOptions },
+};
+function attMsSelected(id){ return ATT_MS_CONFIG[id] ? attStateFor(id)[ATT_MS_CONFIG[id].field] : []; }
+function attStateFor(id){ return ATT_MS_CONFIG[id] && ATT_MS_CONFIG[id].kind==='view' ? ATT_VIEW : ATT_MARK; }
+function attMsControl(id){
+  const cfg = ATT_MS_CONFIG[id];
+  if(!cfg) return '';
+  const sel = attMsSelected(id);
+  return `
+  <div class="ms" id="${id}">
+    <label class="ms-label">${cfg.label}</label>
+    <div class="ms-trigger" id="${id}Trigger" onclick="attTogglePanel(event,'${id}')">
+      <span class="ms-placeholder" id="${id}Placeholder">${sel.includes('all')?cfg.allLabel:(sel.length+' selected')}</span>
+      <span class="ms-caret">▾</span>
+    </div>
+    <div class="ms-panel" id="${id}Panel">
+      <div class="ms-options" id="${id}Options" onclick="event.stopPropagation()"></div>
+    </div>
+  </div>`;
+}
+function attTogglePanel(e, id){
+  e.stopPropagation();
+  const panel = document.getElementById(id+'Panel');
+  const trigger = document.getElementById(id+'Trigger');
+  const willOpen = panel && !panel.classList.contains('open');
+  document.querySelectorAll('.ms-panel.open').forEach(p=>p.classList.remove('open'));
+  document.querySelectorAll('.ms-trigger.open').forEach(t=>t.classList.remove('open'));
+  if(willOpen && panel){ panel.classList.add('open'); trigger.classList.add('open'); attRenderOptions(id); }
+}
+function attRenderOptions(id){
+  const cfg = ATT_MS_CONFIG[id];
+  const wrap = document.getElementById(id+'Options');
+  if(!cfg || !wrap) return;
+  const options = cfg.options();
+  const sel = attMsSelected(id);
+  wrap.innerHTML = options.length ? options.map(o=>`
+    <label class="ms-option"><input type="checkbox" value="${esc(o.value)}" ${sel.includes(o.value)?'checked':''} onchange="attToggleOption('${id}','${esc(o.value)}',this.checked)"> ${esc(o.label)}</label>
+  `).join('') : `<div class="ms-empty">No options available.</div>`;
+}
+function attToggleOption(id, value, checked){
+  const cfg = ATT_MS_CONFIG[id];
+  if(!cfg) return;
+  const field = attStateFor(id)[cfg.field];
+  if(value === 'all'){
+    field.length = 0;
+    if(checked) field.push('all');
+    else field.push('all'); /* an empty selection always means "all" */
+  } else {
+    if(checked){
+      const i = field.indexOf('all'); if(i!==-1) field.splice(i,1);
+      if(!field.includes(value)) field.push(value);
+    } else {
+      const i = field.indexOf(value); if(i!==-1) field.splice(i,1);
+    }
+    if(!field.length) field.push('all');
+  }
+  attRenderOptions(id);
+  attUpdateTrigger(id);
+  if(cfg.field === 'collegeIds') attSyncDepts(cfg.kind);
+}
+function attUpdateTrigger(id){
+  const cfg = ATT_MS_CONFIG[id];
+  const ph = document.getElementById(id+'Placeholder');
+  if(!cfg || !ph) return;
+  ph.textContent = attMsSelected(id).includes('all') ? cfg.allLabel : (attMsSelected(id).length + ' selected');
+}
+function attSyncDepts(kind){
+  const state = kind==='view' ? ATT_VIEW : ATT_MARK;
+  const allColleges = state.collegeIds.includes('all') || !state.collegeIds.length;
+  state.deptOptions = ATT_FILTERS.departments
+    .filter(d => allColleges || state.collegeIds.includes(d.collegeId))
+    .map(d => ({ value:d.id, label:d.name }));
+  state.departmentIds = ['all'];
+  const deptId = kind==='view' ? 'attViewDepts' : 'attMarkDepts';
+  attUpdateTrigger(deptId);
+  attRenderOptions(deptId);
+}
+function cohortChipClass(cohort){
+  return { A:'chip-ready', B:'chip-warn', C:'chip-risk', entry_level:'chip-neutral' }[cohort] || 'chip-neutral';
+}
+function attStatusBadge(status){
+  if(status === 'present') return `<span class="att-status att-present">Present</span>`;
+  if(status === 'absent') return `<span class="att-status att-absent">Absent</span>`;
+  return `<span class="att-status att-notmarked">Not Yet Marked</span>`;
+}
+
+/* ---- Attendance filter data (DB-backed) ---- */
+async function loadAttendanceFilters(){
+  const res = await platformApiGet('/admin/attendance/filters');
+  if(!res.ok){ showToast(res.data?.message || 'Could not load attendance filters.', true); return false; }
+  ATT_FILTERS.colleges = pickArray(res.data,'colleges') || [];
+  ATT_FILTERS.departments = pickArray(res.data,'departments') || [];
+  ATT_FILTERS.cohorts = pickArray(res.data,'cohorts') || [];
+  ATT_FILTERS.trainers = pickArray(res.data,'trainers') || [];
+  ATT_VIEW.trainerOptions = [{value:'super_admin', label:'Super Admin'}].concat(ATT_FILTERS.trainers.map(t=>({value:t.id, label:t.name})));
+  ATT_FILTERS.loaded = true;
+  attSyncDepts('mark');
+  attSyncDepts('view');
+  return true;
+}
+async function enterAttendancePage(page){
+  goPage(page);
+  if(!ATT_FILTERS.loaded){ await loadAttendanceFilters(); renderPage(); }
+}
+
+/* ---- Mark Attendance (full page) ---- */
 function pageAttendanceMark(){
-  const college = STATE.filters.attCollege || (COLLEGES[0] && COLLEGES[0].name) || '';
-  const roster = college ? STUDENTS.filter(s=>s.college===college) : [];
-  ATT_MARK_STATE = ATT_MARK_STATE.college===college ? ATT_MARK_STATE : { college, marks:{} };
+  const m = ATT_MARK;
   return `
-  <div class="toolbar">
-    <select id="attMarkCollege" data-action="att-college">${COLLEGES.length?COLLEGES.map(c=>`<option value="${esc(c.name)}" ${c.name===college?'selected':''}>${c.name}</option>`).join(''):`<option value="">No colleges available</option>`}</select>
-    <select><option>All Cohorts</option><option>Cohort A</option><option>Cohort B</option><option>Cohort C</option></select>
-    <input type="date" value="2026-07-28" style="padding:9px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--paper-raised);">
+  <div class="page-head">
+    <div><p class="desc">Select the filters below, then click Fetch Records to load the matching students. No student rows appear until you do.</p></div>
+    <div class="page-actions">
+      <button class="btn btn-ghost btn-sm" data-action="att-back">${ic('arrowRight','icon icon-sm')}Back to Attendance</button>
+    </div>
   </div>
-  <div class="panel"><div class="panel-body pad-0"><div class="table-wrap"><table class="data-table">
-    <thead><tr><th>Student</th><th>Reg No.</th><th>Department</th><th>Mark</th></tr></thead>
-    <tbody>${roster.length?roster.map(s=>`
-      <tr data-id="${s.id}">
-        <td class="row-title">${avatarChip(s.name,26)} <span style="margin-left:8px;">${s.name}</span></td>
-        <td class="mono">${s.reg}</td><td>${s.dept}</td>
-        <td class="td-actions">
-          <button class="btn btn-xs sa-att-btn" data-action="att-mark" data-sid="${s.id}" data-state="present">✓ Present</button>
-          <button class="btn btn-xs sa-att-btn" data-action="att-mark" data-sid="${s.id}" data-state="absent">✕ Absent</button>
-          <button class="btn btn-xs sa-att-btn" data-action="att-mark" data-sid="${s.id}" data-state="late">◷ Late</button>
-        </td>
-      </tr>`).join(''):`<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:24px;">No students found for this college.</td></tr>`}</tbody>
-  </table></div></div>
-  <div class="panel-foot">
-    <span class="mono" style="font-size:12px;color:var(--text-soft);">${Object.keys(ATT_MARK_STATE.marks||{}).length} of ${roster.length} marked</span>
-    <button class="btn btn-accent btn-sm" data-action="att-save">${ic('check','icon icon-sm')}Save Attendance</button>
-  </div></div>`;
+  <div class="panel att-filter-panel">
+    <div class="panel-body">
+      <div class="form-panel form-panel-wide" style="margin-bottom:4px;">
+        ${attMsControl('attMarkColleges')}
+        ${attMsControl('attMarkDepts')}
+        <div><label class="ms-label">Date</label><input type="date" id="attMarkDate" class="text-field" style="width:100%;" value="${m.date}"></div>
+        ${attMsControl('attMarkCohorts')}
+      </div>
+    </div>
+    <div class="panel-foot">
+      <span class="mono" id="attMarkHint" style="font-size:12px;color:var(--text-soft);">${m.fetched ? m.students.length + ' student(s) match the selected filters' : 'No records loaded yet — click Fetch Records'}</span>
+      <button class="btn btn-accent btn-sm" data-action="att-fetch">${ic('search','icon icon-sm')}Fetch Records</button>
+    </div>
+  </div>
+  ${m.fetched ? attMarkTable() : ''}`;
+}
+function attMarkTable(){
+  const m = ATT_MARK;
+  const total = m.students.length;
+  const marked = Object.keys(m.marks).length;
+  return `
+  <div class="panel">
+    <div class="panel-body pad-0"><div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Student</th><th>Roll Number</th><th>College</th><th>Department</th><th>Current Cohort</th><th>Attendance Status</th></tr></thead>
+      <tbody>
+        ${total ? m.students.map(s=>{
+          const state = m.marks[s.id] || '';
+          return `<tr data-sid="${s.id}">
+            <td class="row-title">${avatarChip(s.name,26)} <span style="margin-left:8px;">${esc(s.name)}</span></td>
+            <td class="mono">${esc(s.rollNumber)}</td>
+            <td>${esc(s.college)}</td>
+            <td>${esc(s.department)}</td>
+            <td><span class="chip ${cohortChipClass(s.cohort)}">${esc(s.cohortLabel)}</span></td>
+            <td class="td-actions">
+              <button class="btn btn-xs sa-att-btn ${state==='present'?'on':''}" data-action="att-mark" data-sid="${s.id}" data-state="present">${ic('check','icon icon-sm')}Present</button>
+              <button class="btn btn-xs sa-att-btn ${state==='absent'?'on':''}" data-action="att-mark" data-sid="${s.id}" data-state="absent">${ic('x','icon icon-sm')}Absent</button>
+            </td>
+          </tr>`;}).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px;">No students match the selected filters.</td></tr>`}
+      </tbody>
+    </table></div></div>
+    <div class="panel-foot">
+      <span class="mono" id="attMarkCount" style="font-size:12px;color:var(--text-soft);">${marked} of ${total} marked</span>
+      <button class="btn btn-accent btn-sm" data-action="att-save">${ic('check','icon icon-sm')}Save Attendance</button>
+    </div>
+  </div>`;
+}
+async function fetchAttendanceStudents(){
+  const m = ATT_MARK;
+  const qs = new URLSearchParams();
+  if(m.collegeIds.length && !m.collegeIds.includes('all')) qs.set('collegeIds', m.collegeIds.join(','));
+  if(m.departmentIds.length && !m.departmentIds.includes('all')) qs.set('departmentIds', m.departmentIds.join(','));
+  if(m.cohorts.length && !m.cohorts.includes('all')) qs.set('cohorts', m.cohorts.join(','));
+  const res = await platformApiGet('/admin/attendance/students?' + qs.toString());
+  if(res.ok){
+    ATT_MARK.students = pickArray(res.data,'students') || [];
+    ATT_MARK.marks = {};
+    ATT_MARK.fetched = true;
+  } else {
+    showToast(res.data?.message || 'Could not load students.', true);
+    ATT_MARK.fetched = false;
+  }
+  renderPage();
+}
+async function saveAttendance(){
+  const m = ATT_MARK;
+  const ids = Object.keys(m.marks);
+  if(!ids.length){ showToast('Mark at least one student first', true); return; }
+  const counts = { present:0, absent:0 };
+  ids.forEach(sid => counts[m.marks[sid]] = (counts[m.marks[sid]]||0) + 1);
+  const marks = ids.map(studentId => ({ studentId, status:m.marks[studentId] }));
+  openConfirm({
+    icon:'check', title:'Attendance Summary',
+    message:`Save attendance for <b>${ids.length} students</b> on <b>${esc(m.date)}</b>?<br><span style="color:var(--teal-dark);font-weight:700;">${counts.present||0} present</span> · <span style="color:var(--rose);font-weight:700;">${counts.absent||0} absent</span>`,
+    confirmLabel:'Save Attendance', danger:false,
+    onConfirm: async ()=>{
+      const res = await platformApiPost('/admin/attendance/mark', { date:m.date, marks });
+      if(res.ok){
+        showToast((res.data?.message) || 'Attendance saved');
+        ATT_MARK.marks = {};
+        ATT_MARK.fetched = false;
+        ATT_MARK.students = [];
+        goPage('attendance');
+      } else {
+        showToast(res.data?.message || 'Could not save attendance.', true);
+      }
+    }
+  });
 }
 
+/* ---- View Records (full page) ---- */
 function pageAttendanceView(){
+  const v = ATT_VIEW;
   return `
-  <div class="toolbar">
-    <select id="attViewCollege"><option value="all">All Colleges</option>${COLLEGES.map(c=>`<option value="${esc(c.name)}">${c.name}</option>`).join('')}</select>
-    <select id="attViewTrainer"><option value="all">All Trainers</option>${TRAINERS.map(t=>`<option value="${esc(t.name)}">${t.name}</option>`).join('')}</select>
+  <div class="page-head">
+    <div><p class="desc">Attendance records for the selected date. Students with no mark on that date are shown as Not Yet Marked.</p></div>
+    <div class="page-actions">
+      <button class="btn btn-ghost btn-sm" data-action="att-back">${ic('arrowRight','icon icon-sm')}Back to Attendance</button>
+      <button class="btn btn-ghost btn-sm" data-action="att-export-excel">${ic('download','icon icon-sm')}Export to Excel</button>
+      <button class="btn btn-ghost btn-sm" data-action="att-print">${ic('fileText','icon icon-sm')}Print / PDF</button>
+    </div>
   </div>
-  <div class="panel"><div class="panel-body pad-0"><div class="table-wrap"><table class="data-table" id="attRecordsTable">
-    <thead><tr><th>Date</th><th>College</th><th>Cohort</th><th>Marked By</th><th>Present</th><th>Absent</th><th>Late</th><th>Excused</th><th>Actions</th></tr></thead>
-    <tbody>${ATTENDANCE_RECORDS.map((a,i)=>`
-      <tr data-college="${esc(a.college)}" data-trainer="${esc(a.trainer)}">
-        <td class="mono">${a.date}</td><td>${a.college}</td><td>${a.cohort}</td><td>${a.markedBy}</td>
-        <td class="mono" style="color:var(--teal-dark);">${a.present}</td><td class="mono" style="color:var(--rose);">${a.absent}</td>
-        <td class="mono">${a.late}</td><td class="mono">${a.excused}</td>
-        <td class="td-actions"><button class="btn btn-ghost btn-xs" data-action="view-attendance-record" data-idx="${i}">${ic('eye','icon icon-sm')}View</button></td>
-      </tr>`).join('')}</tbody>
-  </table></div></div></div>`;
+  <div class="panel att-filter-panel">
+    <div class="panel-body">
+      <div class="form-panel form-panel-wide" style="margin-bottom:4px;">
+        ${attMsControl('attViewColleges')}
+        ${attMsControl('attViewDepts')}
+        ${attMsControl('attViewTrainers')}
+        <div><label class="ms-label">Date</label><input type="date" id="attViewDate" class="text-field" style="width:100%;" value="${v.date}"></div>
+      </div>
+    </div>
+    <div class="panel-foot">
+      <span class="mono" id="attViewStatus" style="font-size:12px;color:var(--text-soft);">${v.loaded ? v.records.length+' student(s) for '+v.date : 'Choose filters and click Apply Filters'}</span>
+      <button class="btn btn-accent btn-sm" data-action="att-apply-view">${ic('search','icon icon-sm')}Apply Filters</button>
+    </div>
+  </div>
+  ${v.loaded ? attViewResults(v) : ''}`;
+}
+function attViewResults(v){
+  const rows = v.records;
+  const summary = v.summary || {};
+  return `
+  <div class="stat-block-grid" style="margin-bottom:16px;">
+    <div class="stat-block"><b style="color:var(--teal-dark);">${summary.present||0}</b><span>Present</span></div>
+    <div class="stat-block"><b style="color:var(--rose);">${summary.absent||0}</b><span>Absent</span></div>
+    <div class="stat-block"><b style="color:var(--text-soft);">${summary.notMarked||0}</b><span>Not Yet Marked</span></div>
+    <div class="stat-block"><b>${summary.total||0}</b><span>Total Students</span></div>
+  </div>
+  <div class="panel">
+    <div class="panel-body pad-0"><div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Student</th><th>Roll Number</th><th>College</th><th>Department</th><th>Current Cohort</th><th>Marked By</th><th>Status</th></tr></thead>
+      <tbody>
+        ${rows.length ? rows.map(r=>`
+          <tr>
+            <td class="row-title">${avatarChip(r.studentName,26)} <span style="margin-left:8px;">${esc(r.studentName)}</span></td>
+            <td class="mono">${esc(r.rollNumber)}</td>
+            <td>${esc(r.college)}</td>
+            <td>${esc(r.department)}</td>
+            <td><span class="chip ${cohortChipClass(r.cohort)}">${esc(r.cohortLabel)}</span></td>
+            <td>${r.markedBy ? esc(r.markedBy.name) : '—'}</td>
+            <td>${attStatusBadge(r.status)}</td>
+          </tr>`).join('') : `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:24px;">No students found for the selected filters.</td></tr>`}
+      </tbody>
+    </table></div></div>
+  </div>`;
+}
+async function loadAttendanceRecords(){
+  const v = ATT_VIEW;
+  const qs = new URLSearchParams();
+  if(v.collegeIds.length && !v.collegeIds.includes('all')) qs.set('collegeIds', v.collegeIds.join(','));
+  if(v.departmentIds.length && !v.departmentIds.includes('all')) qs.set('departmentIds', v.departmentIds.join(','));
+  if(v.trainerIds.length && !v.trainerIds.includes('all')) qs.set('trainerIds', v.trainerIds.join(','));
+  qs.set('date', v.date);
+  const res = await platformApiGet('/admin/attendance/records?' + qs.toString());
+  if(res.ok){
+    ATT_VIEW.records = pickArray(res.data,'records') || [];
+    ATT_VIEW.summary = res.data;
+    ATT_VIEW.loaded = true;
+  } else {
+    showToast(res.data?.message || 'Could not load attendance records.', true);
+    ATT_VIEW.loaded = false;
+  }
+  renderPage();
+}
+function attExportExcel(){
+  if(!ATT_VIEW.records.length){ showToast('No records to export.', true); return; }
+  const rows = ATT_VIEW.records.map(r => ({
+    'Student Name': r.studentName,
+    'Roll Number': r.rollNumber,
+    'College': r.college,
+    'Department': r.department,
+    'Current Cohort': r.cohortLabel,
+    'Marked By': r.markedBy ? r.markedBy.name : '—',
+    'Status': (r.status==='not_marked' ? 'Not Yet Marked' : (r.status.charAt(0).toUpperCase()+r.status.slice(1))),
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Attendance ' + ATT_VIEW.date);
+  XLSX.writeFile(wb, 'attendance-records-'+ATT_VIEW.date+'.xlsx');
+  showToast('Attendance export downloaded');
+}
+function attPrint(){
+  if(!ATT_VIEW.records.length){ showToast('No records to print.', true); return; }
+  const columns = ['Student Name','Roll Number','College','Department','Current Cohort','Marked By','Status'];
+  const rows = ATT_VIEW.records.map(r => [
+    r.studentName, r.rollNumber, r.college, r.department, r.cohortLabel,
+    r.markedBy ? r.markedBy.name : '—',
+    r.status==='not_marked' ? 'Not Yet Marked' : (r.status.charAt(0).toUpperCase()+r.status.slice(1)),
+  ]);
+  const win = window.open('', '_blank');
+  win.document.write(`<html><head><title>Attendance Records</title><style>
+    body{font-family:Arial,sans-serif;padding:24px;color:#1E1A14;} h1{font-size:18px;margin:0;} p{color:#564B3D;font-size:12px;}
+    table{width:100%;border-collapse:collapse;margin-top:14px;} th,td{border:1px solid #DCD2C0;padding:6px 8px;font-size:12px;text-align:left;}
+    th{background:#F5EEE2;} .present{color:#0E7B71;font-weight:700;} .absent{color:#B43020;font-weight:700;} .not{color:#9A8F80;}
+    </style></head><body>
+    <h1>Attendance Records</h1><p>Date: ${esc(ATT_VIEW.date)} · Employability Intelligence Platform · Generated ${esc(new Date().toLocaleString())}</p>
+    <table><thead><tr>${columns.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${i===6?(c==='Present'?'present':c==='Absent'?'absent':'not'):''}">${esc(String(c))}</td>`).join('')}</tr>`).join('')}</tbody></table>
+    </body></html>`);
+  win.document.close(); win.focus();
+  setTimeout(()=>win.print(), 300);
 }
 
 function pageAssessments(){
@@ -3150,37 +3507,116 @@ function pageAssessmentsValidationVerification(){
       </tr>`).join(''):`<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:24px;">No results match these filters.</td></tr>`}</tbody>
   </table></div></div></div>`;
 }
+// Single source of truth: three editable thresholds (Placement Ready /
+// Near Ready / High Risk) + the two weight fields, nothing else. Every
+// value is read straight from db.placement_rules; there are no defaults
+// baked into this markup.
+function placementRuleWeightsValid(){
+  const a = parseFloat(document.getElementById('ruleAssessWeight')?.value);
+  const i = parseFloat(document.getElementById('ruleInterviewWeight')?.value);
+  return !Number.isNaN(a) && !Number.isNaN(i) && Math.round((a + i) * 100) / 100 === 100;
+}
+// Re-checks weight validity live as the admin types and enables/disables
+// Save Rules accordingly, without a full page re-render (keeps focus/
+// cursor position in the field being edited).
+function updatePlacementRuleValidation(){
+  const btn = document.getElementById('saveRulesBtn');
+  const msg = document.getElementById('ruleWeightMsg');
+  const valid = placementRuleWeightsValid();
+  if(btn) btn.disabled = !valid;
+  if(msg) msg.style.display = valid ? 'none' : '';
+}
 function pagePlacementRules(){
+  const pr = PLACEMENT_RULES || {};
+  const placementReady = typeof pr.placementReadyThreshold === 'number' ? pr.placementReadyThreshold : 75;
+  const nearReady = typeof pr.nearReadyThreshold === 'number' ? pr.nearReadyThreshold : 50;
+  const highRisk = typeof pr.highRiskThreshold === 'number' ? pr.highRiskThreshold : 50;
+  const assessW = typeof pr.assessmentWeight === 'number' ? pr.assessmentWeight : 50;
+  const interviewW = typeof pr.interviewWeight === 'number' ? pr.interviewWeight : 50;
+  const weightsValid = Math.round((assessW + interviewW) * 100) / 100 === 100;
   return `
-  <div class="page-head"><div><p class="desc">Configure the score bands that classify students into readiness cohorts platform-wide.</p></div></div>
-  <div class="grid-2">
-    <div class="panel">
-      <div class="panel-bar"><span class="panel-dot pd-1"></span><span class="panel-dot pd-2"></span><span class="panel-dot pd-3"></span><span class="panel-title">readiness-thresholds.cfg</span></div>
-      <div class="panel-body">
-        <div class="form-panel">
-          <div class="form-group"><label>Placement Ready — minimum overall score</label><input type="number" value="80" id="ruleReady"></div>
-          <div class="form-group"><label>Near Ready — minimum overall score</label><input type="number" value="60" id="ruleNear"></div>
-          <div class="form-group"><label>High Risk — below</label><input type="number" value="60" id="ruleRisk"></div>
-          <div class="form-group"><label>Minimum improvement % to exit High Risk</label><input type="number" value="10"></div>
-          <div class="form-group full"><label>Weighting — Communication / Technical / Aptitude / Professionalism / Interview</label><input type="text" value="20 / 25 / 20 / 15 / 20"></div>
-        </div>
-        <div style="margin-top:18px;"><button class="btn btn-accent btn-sm" data-action="save-rules">Save Rules</button></div>
-      </div>
-    </div>
-    <div class="panel">
-      <div class="panel-bar"><span class="panel-dot pd-1"></span><span class="panel-dot pd-2"></span><span class="panel-dot pd-3"></span><span class="panel-title">current distribution</span></div>
-      <div class="panel-body">${donutSVG(STUDENT_DIST.slice(0,3))}
-        <div class="legend" style="margin-top:16px;">${STUDENT_DIST.slice(0,3).map(s=>`<div class="legend-row"><span class="legend-dot" style="background:${s.color}"></span><span class="lg-label">${s.label}</span><span class="lg-val">${s.value.toLocaleString()}</span></div>`).join('')}</div>
-      </div>
-    </div>
-  </div>
-  <div class="panel" style="margin-top:18px;">
-    <div class="panel-bar"><span class="panel-dot pd-1"></span><span class="panel-dot pd-2"></span><span class="panel-dot pd-3"></span><span class="panel-title">cohort-data-sync.job</span></div>
+  <div class="page-head"></div>
+  <div class="panel">
+    <div class="panel-bar"><span class="panel-dot pd-1"></span><span class="panel-dot pd-2"></span><span class="panel-dot pd-3"></span><span class="panel-title">placement rules</span></div>
     <div class="panel-body">
-      <p class="desc" style="margin-bottom:12px;">Cohort-mapping bug fix: run this once to retroactively correct any student whose Create-Quiz result was Validated <em>before</em> this fix existed — their assigned cohort never propagated to their account, so quizzes targeted at their cohort stayed invisible to them even though their own Quiz History always showed it correctly. Safe to re-run any time; already-correct students are left untouched.</p>
-      <button class="btn btn-ghost btn-sm" data-action="run-cohort-backfill">${ic('history','icon icon-sm')} Sync Student Cohorts</button>
+      <div class="form-panel form-panel-wide">
+        <div class="form-group">
+          <label>Placement Ready threshold (Cohort A) — Marks &ge;</label>
+          <input type="number" value="${esc(placementReady)}" id="rulePlacementReady" min="0" max="100" step="0.01">
+        </div>
+        <div class="form-group">
+          <label>Near Ready threshold (Cohort B) — Marks &ge;</label>
+          <input type="number" value="${esc(nearReady)}" id="ruleNearReady" min="0" max="100" step="0.01">
+        </div>
+        <div class="form-group">
+          <label>High Risk threshold (Cohort C) — Marks &lt;</label>
+          <input type="number" value="${esc(highRisk)}" id="ruleHighRisk" min="0" max="100" step="0.01">
+        </div>
+        <div class="form-group">
+          <label>Assessment Weight</label>
+          <input type="number" value="${esc(assessW)}" id="ruleAssessWeight" min="0" max="100" step="1">
+        </div>
+        <div class="form-group">
+          <label>Interview Weight</label>
+          <input type="number" value="${esc(interviewW)}" id="ruleInterviewWeight" min="0" max="100" step="1">
+        </div>
+      </div>
+      <div id="ruleWeightMsg" class="desc" style="margin-top:10px;color:var(--danger,#d9534f);${weightsValid?'display:none;':''}">Assessment Weight + Interview Weight must equal exactly 100.</div>
+      <div style="margin-top:18px;">
+        <button class="btn btn-accent btn-sm" id="saveRulesBtn" data-action="save-rules" ${weightsValid?'':'disabled'}>Save Rules</button>
+      </div>
     </div>
   </div>`;
+}
+
+// Reads the Placement Rules form, validates it client-side (server
+// validates again regardless), and PUTs the new thresholds to
+// db.placement_rules. Saving always triggers an immediate, automatic
+// recalculation of every existing student's cohort on the backend —
+// there is no separate sync job or checkbox. Always reloads
+// PLACEMENT_RULES from the server afterwards so the page never shows
+// anything the database didn't actually confirm saving.
+async function saveCohortRules(btn){
+  const placementReady = parseFloat(document.getElementById('rulePlacementReady').value);
+  const nearReady = parseFloat(document.getElementById('ruleNearReady').value);
+  const highRisk = parseFloat(document.getElementById('ruleHighRisk').value);
+  const assessPct = parseFloat(document.getElementById('ruleAssessWeight').value);
+  const interviewPct = parseFloat(document.getElementById('ruleInterviewWeight').value);
+
+  if([placementReady, nearReady, highRisk].some(v => Number.isNaN(v) || v < 0 || v > 100)){
+    showToast('All three thresholds must be numbers between 0 and 100.', true);
+    return;
+  }
+  if(placementReady < nearReady){
+    showToast('Placement Ready threshold must be greater than or equal to Near Ready threshold.', true);
+    return;
+  }
+  if(!placementRuleWeightsValid()){
+    showToast('Assessment Weight + Interview Weight must equal exactly 100.', true);
+    return;
+  }
+
+  const original = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = 'Saving…';
+  const res = await platformApiPut('/admin/placement-rules', {
+    placementReadyThreshold: placementReady,
+    nearReadyThreshold: nearReady,
+    highRiskThreshold: highRisk,
+    assessmentWeight: assessPct,
+    interviewWeight: interviewPct,
+  });
+  btn.disabled = false; btn.innerHTML = original;
+
+  if(res.ok){
+    await loadPlacementRules();
+    const n = res.data && res.data.recalculatedStudents;
+    showToast(typeof n === 'number'
+      ? `Placement rules saved — ${n} student${n===1?'':'s'} recalculated.`
+      : 'Placement rules saved.');
+    if(STATE.page === 'placement-rules') renderPage();
+  } else {
+    showToast((res.data && res.data.message) || 'Could not save placement rules.', true);
+  }
 }
 
 /* ============================================================
@@ -3204,20 +3640,26 @@ function pageInterventions(){
 }
 
 function pageInterventionSessions(){
+  const collegeOptions = MANAGED_COLLEGES.filter(c=>c.status==='active');
   return `
   <div class="toolbar">
     <div class="search-box"><span>${ic('search','icon icon-sm')}</span><input type="text" placeholder="Search sessions…" id="sessionSearch"></div>
-    <select id="sessionCollegeFilter"><option value="all">All Colleges</option>${COLLEGES.map(c=>`<option value="${esc(c.name)}">${c.name}</option>`).join('')}</select>
+    <select id="sessionCollegeFilter"><option value="all">All Colleges</option>${collegeOptions.map(c=>`<option value="${esc(c.collegeName)}">${esc(c.collegeName)}</option>`).join('')}</select>
     <select id="sessionStatusFilter"><option value="all">All Status</option><option value="scheduled">Scheduled</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select>
   </div>
   <div class="card-grid" id="sessionGrid">
-    ${WORKSHOP_SESSIONS.map((w,idx)=>`
-      <div class="entity-card" style="cursor:default;" data-search="${esc((w.name+' '+w.trainer+' '+w.college).toLowerCase())}" data-college="${esc(w.college)}" data-status="${w.status}">
-        <div class="entity-card-top"><div class="entity-logo" style="background:linear-gradient(135deg,var(--amber),var(--rose));">${ic('puzzle','icon icon-lg')}</div><div><h4>${w.name}</h4><p>${w.college}</p></div></div>
+    ${WORKSHOP_SESSIONS.length?WORKSHOP_SESSIONS.map((w,idx)=>{
+      const colleges = w.colleges || (w.college && w.college!=='—' ? [w.college] : []);
+      const trainers = w.trainers || (w.trainer && w.trainer!=='—' ? [w.trainer] : []);
+      const departments = w.departments || [];
+      return `
+      <div class="entity-card" style="cursor:default;" data-search="${esc((w.name+' '+trainers.join(' ')+' '+colleges.join(' ')).toLowerCase())}" data-college="${esc(colleges.join('|'))}" data-status="${w.status}">
+        <div class="entity-card-top"><div class="entity-logo" style="background:linear-gradient(135deg,var(--amber),var(--rose));">${ic('puzzle','icon icon-lg')}</div><div><h4>${esc(w.name)}</h4><p>${esc(colleges.join(', ')||'—')}</p></div></div>
         <div style="font-size:12.5px;color:var(--text-soft);display:flex;flex-direction:column;gap:4px;margin:10px 0;">
-          <span>👤 ${w.trainer} · ${w.cohort}</span>
-          <span>📅 ${w.date} · ${w.time}</span>
-          <span>📍 ${w.venue} · ${w.seats} seats</span>
+          <span>👤 ${esc(trainers.join(', ')||'—')} · ${esc(w.cohort||'—')}</span>
+          <span>🎓 ${esc(departments.join(', ')||'—')}</span>
+          <span>📅 ${esc(w.date||'—')} · ${esc(w.time||'—')}</span>
+          <span>📍 ${esc(w.venue||'—')} · Attendance: ${w.attendanceRequirement==='mandatory'?'Mandatory':'Optional'}</span>
         </div>
         <div class="entity-card-foot">
           ${statusChip(w.status==='scheduled'?'published':w.status==='completed'?'completed':'expired')}
@@ -3227,7 +3669,8 @@ function pageInterventionSessions(){
             <button class="btn-icon" style="width:30px;height:30px;" data-action="delete-session" data-idx="${idx}" title="Delete">${ic('trash','icon icon-sm')}</button>
           </div>
         </div>
-      </div>`).join('')}
+      </div>`;
+    }).join(''):'<p style="color:var(--text-faint);padding:20px;">No sessions scheduled yet.</p>'}
   </div>`;
 }
 
@@ -3251,7 +3694,7 @@ function pageInterventionHistory(){
   return `
   <div class="panel"><div class="panel-body pad-0"><div class="table-wrap"><table class="data-table">
     <thead><tr><th>Session</th><th>College</th><th>Trainer</th><th>Cohort</th><th>Date</th><th>Attendance</th></tr></thead>
-    <tbody>${past.length?past.map(w=>`<tr><td class="row-title">${w.name}</td><td>${w.college}</td><td>${w.trainer}</td><td>${w.cohort}</td><td class="mono">${w.date}</td><td class="mono">${Math.round(w.seats*0.8)}/${w.seats}</td></tr>`).join(''):'<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px;">No completed sessions yet.</td></tr>'}</tbody>
+    <tbody>${past.length?past.map(w=>`<tr><td class="row-title">${esc(w.name)}</td><td>${esc((w.colleges||[]).join(', ')||w.college||'—')}</td><td>${esc((w.trainers||[]).join(', ')||w.trainer||'—')}</td><td>${esc(w.cohort||'—')}</td><td class="mono">${esc(w.date||'—')}</td><td class="mono">${w.attendanceRequirement==='mandatory'?'Mandatory':'Optional'}</td></tr>`).join(''):'<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px;">No completed sessions yet.</td></tr>'}</tbody>
   </table></div></div></div>`;
 }
 
@@ -3539,7 +3982,7 @@ function applyMultiFilter(containerSelector, rowSelector, searchId, filterMap){
       for(const selId in filterMap){
         const val = document.getElementById(selId)?.value;
         const attr = filterMap[selId];
-        if(val && val!=='all' && row.dataset[attr]!==val){ ok=false; break; }
+        if(val && val!=='all' && !(row.dataset[attr]||'').split('|').includes(val)){ ok=false; break; }
       }
     }
     row.style.display = ok ? '' : 'none';
@@ -3605,8 +4048,8 @@ document.addEventListener('click', function(e){
     case 'verify-delete': { const v=VERIFICATION_QUEUE.find(x=>x.id===id); openConfirm({icon:'trash', danger:true, title:'Delete this application?', message:`This removes ${v.college}'s application from this screen only — reject it above to actually remove the account.`, confirmLabel:'Delete', onConfirm:()=>{ const i=VERIFICATION_QUEUE.indexOf(v); VERIFICATION_QUEUE.splice(i,1); showToast(`${v.college} removed from view`, true); renderPage(); }}); break; }
 
     /* trainer verification — backed by GET/PUT /api/auth (trainers) */
-    case 'view-trainer-application': { const t=TRAINER_APPLICATIONS.find(x=>x.id===id); openConfirm({icon:'fileText', title:t.name, message:`${t.email} · ${t.phone}. Requested colleges: ${t.colleges.join(', ')}. Registered ${t.date}.`, confirmLabel:'Close', onConfirm:()=>{}}); break; }
-    case 'trainer-approve': { const t=TRAINER_APPLICATIONS.find(x=>x.id===id); openConfirm({icon:'userCheck', title:'Approve this trainer?', message:`${t.name} will be activated and assigned to: ${t.colleges.join(', ')}. They will be able to log in immediately.`, confirmLabel:'Approve', onConfirm: async ()=>{
+    case 'view-trainer-application': { const t=TRAINER_APPLICATIONS.find(x=>x.id===id); openConfirm({icon:'fileText', title:t.name, message:`${t.email} · ${t.phone}. Registered ${t.date}.`, confirmLabel:'Close', onConfirm:()=>{}}); break; }
+    case 'trainer-approve': { const t=TRAINER_APPLICATIONS.find(x=>x.id===id); openConfirm({icon:'userCheck', title:'Approve this trainer?', message:`${t.name} will be activated and will be able to log in immediately.`, confirmLabel:'Approve', onConfirm: async ()=>{
       const res = await authApiPut(`/approve/${t.id}`);
       if(res.ok){ showToast(`${t.name} approved and activated`); await refreshApprovalData(); }
       else { showToast(res.data.message||'Could not approve this trainer.', true); }
@@ -3630,10 +4073,28 @@ document.addEventListener('click', function(e){
       if(res.ok){ showToast(`${v.name} rejected`, true); await refreshApprovalData(); }
       else { showToast(res.data.message||'Could not reject this student.', true); }
     }}); break; }
-    case 'trainer-suspend': { const t=TRAINERS.find(x=>x.id===id); openConfirm({icon:'pause', danger:true, title:'Suspend this trainer?', message:`${t.name} will immediately lose access to every assigned college.`, confirmLabel:'Suspend', onConfirm:()=>{ t.status='suspended'; showToast(`${t.name} suspended`, true); renderPage(); }}); break; }
-    case 'trainer-activate': { const t=TRAINERS.find(x=>x.id===id); openConfirm({icon:'play', title:'Activate this trainer?', message:`${t.name} will regain access to all assigned colleges.`, confirmLabel:'Activate', onConfirm:()=>{ t.status='active'; showToast(`${t.name} activated`); renderPage(); }}); break; }
-    case 'trainer-set-inactive': { const t=TRAINERS.find(x=>x.id===id); t.status='inactive'; showToast(`${t.name} marked inactive`, true); renderPage(); break; }
-    case 'trainer-set-active': { const t=TRAINERS.find(x=>x.id===id); t.status='active'; showToast(`${t.name} marked active`); renderPage(); break; }
+    case 'trainer-suspend': { const t=TRAINERS.find(x=>x.id===id); openConfirm({icon:'pause', danger:true, title:'Suspend this trainer?', message:`${t.name} will immediately lose platform access.`, confirmLabel:'Suspend', onConfirm: async ()=>{
+      if(el){ el.disabled = true; el.textContent = 'Suspending…'; }
+      const res = await platformApiPatch(`/admin/trainers/${t.id}/status`, { status:'suspended' });
+      if(res.ok){ await loadTrainers(); showToast(`${t.name} suspended`, true); renderPage(); }
+      else { if(el){ el.disabled = false; el.textContent = 'Suspend'; } showToast(res.data?.message || 'Could not suspend this trainer.', true); }
+    }}); break; }
+    case 'trainer-activate': { const t=TRAINERS.find(x=>x.id===id); openConfirm({icon:'play', title:'Activate this trainer?', message:`${t.name} will regain platform access.`, confirmLabel:'Activate', onConfirm: async ()=>{
+      if(el){ el.disabled = true; el.textContent = 'Activating…'; }
+      const res = await platformApiPatch(`/admin/trainers/${t.id}/status`, { status:'active' });
+      if(res.ok){ await loadTrainers(); showToast(`${t.name} activated`); renderPage(); }
+      else { if(el){ el.disabled = false; el.textContent = 'Activate'; } showToast(res.data?.message || 'Could not activate this trainer.', true); }
+    }}); break; }
+    case 'trainer-reset': { const t=TRAINERS.find(x=>x.id===id); openConfirm({icon:'key', title:'Reset trainer credentials?', message:`This generates a new temporary password for ${t.name} and signs them out of any active session. You'll need to share the new password with them securely.`, confirmLabel:'Reset Password', onConfirm: async ()=>{
+      if(el){ el.disabled = true; el.textContent = 'Resetting…'; }
+      const res = await platformApiPost(`/admin/trainers/${t.id}/reset-password`, {});
+      if(el){ el.disabled = false; el.innerHTML = `${ic('key','icon icon-sm')}Reset`; }
+      if(res.ok){
+        await loadTrainers(); renderPage();
+        openConfirm({icon:'key', title:'Credentials reset', message:`New temporary password for ${t.name}: ${res.data.temporaryPassword}. Share this with them securely — they should change it after logging in.`, confirmLabel:'Done', onConfirm:()=>{}});
+        showToast(`${t.name}'s credentials were reset`);
+      } else { showToast(res.data?.message || 'Could not reset this trainer\'s credentials.', true); }
+    }}); break; }
     case 'manage-trainer-colleges': { openTrainerCollegesModal(id); break; }
     case 'save-trainer-colleges': { saveTrainerColleges(id); break; }
 
@@ -3653,20 +4114,54 @@ document.addEventListener('click', function(e){
 
     /* departments */
     case 'edit-department': openConfirm({icon:'edit', title:`Edit ${DEPARTMENTS[idx].name}`, message:'This opens the department edit form.', confirmLabel:'Got it', onConfirm:()=>{}}); break;
-    case 'toggle-department': openConfirm({icon:'pause', title:'Change department status?', message:`This will toggle ${DEPARTMENTS[idx].name} active/inactive across every college using it.`, confirmLabel:'Confirm', onConfirm:()=>{ showToast('Department status updated'); }}); break;
-    case 'delete-department': openConfirm({icon:'trash', danger:true, title:'Delete this department?', message:`${DEPARTMENTS[idx].name} will be removed from every college. This cannot be undone.`, confirmLabel:'Delete', onConfirm:()=>{ DEPARTMENTS.splice(idx,1); showToast('Department deleted', true); renderPage(); }}); break;
+    case 'toggle-department': { const d=DEPARTMENTS[idx]; const next = d.status==='inactive'?'active':'inactive'; openConfirm({icon:'pause', title:`${next==='active'?'Activate':'Deactivate'} this department?`, message:`This will mark ${d.name} as ${next} for its college.`, confirmLabel:'Confirm', onConfirm: async ()=>{
+      const res = await platformApiPatch(`/admin/departments/${d.id}`, { status: next });
+      if(res.ok){ await loadDepartments(); showToast('Department status updated'); renderPage(); }
+      else { showToast(res.data?.message || 'Could not update department status.', true); }
+    }}); break; }
+    case 'delete-department': { const d=DEPARTMENTS[idx]; openConfirm({icon:'trash', danger:true, title:'Delete this department?', message:`${d.name} will be removed from its college. This cannot be undone.`, confirmLabel:'Delete', onConfirm: async ()=>{
+      const res = await platformApiDelete(`/admin/departments/${d.id}`);
+      if(res.ok){ await loadDepartments(); showToast('Department deleted', true); renderPage(); }
+      else { showToast(res.data?.message || 'Could not delete this department.', true); }
+    }}); break; }
 
-    /* user management */
+    /* user management — every action below hits the real
+       /api/admin/users/* endpoints in superadmin.py and reloads USERS
+       from the database afterwards, so the table never shows a status
+       the backend hasn't actually confirmed. */
     case 'open-status-by-email': openConfirm({icon:'key', title:'Activate or deactivate by email', message:'Enter the exact email address of the account you want to change. You will be asked to confirm before the change is applied.', confirmLabel:'Continue', withInput:true, inputPlaceholder:'name@college.edu', onConfirm:(email)=>{
       if(!email){ showToast('Enter an email address', true); return; }
       const u = USERS.find(x=>x.email.toLowerCase()===email.toLowerCase());
       if(!u){ showToast('No account found with that email', true); return; }
-      openConfirm({icon:'key', danger:u.status==='active', title:`${u.status==='active'?'Deactivate':'Activate'} ${u.name}?`, message:`This will ${u.status==='active'?'revoke':'restore'} platform access for ${u.email}.`, confirmLabel:u.status==='active'?'Deactivate':'Activate', onConfirm:()=>{ u.status = u.status==='active'?'suspended':'active'; showToast(`${u.name} ${u.status==='active'?'activated':'deactivated'}`); renderPage(); }});
+      const next = u.status==='active' ? 'inactive' : 'active';
+      openConfirm({icon:'key', danger:u.status==='active', title:`${next==='inactive'?'Deactivate':'Activate'} ${u.name}?`, message:`This will ${next==='inactive'?'revoke':'restore'} platform access for ${u.email}.`, confirmLabel:next==='inactive'?'Deactivate':'Activate', onConfirm: async ()=>{
+        const res = await platformApiPatch(`/admin/users/${u.id}/status`, { status: next });
+        if(res.ok){ await loadUsersAdmin(); showToast(`${u.name} ${next==='inactive'?'deactivated':'activated'}`); renderPage(); }
+        else { showToast(res.data?.message || 'Could not update this account.', true); }
+      }});
     }}); break;
-    case 'reset-password': { const u=USERS.find(x=>x.id===id); openConfirm({icon:'key', title:'Reset password?', message:`${u.name} will receive a password reset link at ${u.email}.`, confirmLabel:'Send Reset Link', onConfirm:()=>{ showToast(`Reset link sent to ${u.email}`); }}); break; }
-    case 'suspend-user': { const u=USERS.find(x=>x.id===id); openConfirm({icon:'pause', danger:true, title:'Suspend this account?', message:`${u.name} will immediately lose access to the platform.`, confirmLabel:'Suspend', onConfirm:()=>{ u.status='suspended'; showToast(`${u.name} suspended`, true); renderPage(); }}); break; }
-    case 'activate-user': { const u=USERS.find(x=>x.id===id); openConfirm({icon:'play', title:'Activate this account?', message:`${u.name} will regain access to the platform.`, confirmLabel:'Activate', onConfirm:()=>{ u.status='active'; showToast(`${u.name} activated`); renderPage(); }}); break; }
-    case 'delete-user': { const u=USERS.find(x=>x.id===id); openConfirm({icon:'trash', danger:true, title:'Delete this account?', message:`This permanently removes ${u.name}'s account and records. This cannot be undone.`, confirmLabel:'Delete', onConfirm:()=>{ const i=USERS.indexOf(u); USERS.splice(i,1); showToast(`${u.name} deleted`, true); renderPage(); }}); break; }
+    case 'reset-password': { const u=USERS.find(x=>x.id===id); openConfirm({icon:'key', title:'Reset password?', message:`This generates a new temporary password for ${u.name} and signs them out of any active session. You'll need to share the new password with them securely.`, confirmLabel:'Reset Password', onConfirm: async ()=>{
+      const res = await platformApiPost(`/admin/users/${u.id}/reset-password`, {});
+      if(res.ok){
+        openConfirm({icon:'key', title:'Credentials reset', message:`New temporary password for ${u.name}: ${res.data.temporaryPassword}. Share this with them securely — they should change it after logging in.`, confirmLabel:'Done', onConfirm:()=>{}});
+        showToast(`${u.name}'s credentials were reset`);
+      } else { showToast(res.data?.message || `Could not reset ${u.name}'s credentials.`, true); }
+    }}); break; }
+    case 'suspend-user': { const u=USERS.find(x=>x.id===id); openConfirm({icon:'pause', danger:true, title:'Deactivate this account?', message:`${u.name} will immediately lose access to the platform.`, confirmLabel:'Deactivate', onConfirm: async ()=>{
+      const res = await platformApiPatch(`/admin/users/${u.id}/status`, { status:'inactive' });
+      if(res.ok){ await loadUsersAdmin(); showToast(`${u.name} deactivated`, true); renderPage(); }
+      else { showToast(res.data?.message || 'Could not deactivate this account.', true); }
+    }}); break; }
+    case 'activate-user': { const u=USERS.find(x=>x.id===id); openConfirm({icon:'play', title:'Activate this account?', message:`${u.name} will regain access to the platform.`, confirmLabel:'Activate', onConfirm: async ()=>{
+      const res = await platformApiPatch(`/admin/users/${u.id}/status`, { status:'active' });
+      if(res.ok){ await loadUsersAdmin(); showToast(`${u.name} activated`); renderPage(); }
+      else { showToast(res.data?.message || 'Could not activate this account.', true); }
+    }}); break; }
+    case 'delete-user': { const u=USERS.find(x=>x.id===id); openConfirm({icon:'trash', danger:true, title:'Delete this account?', message:`This removes ${u.name}'s account from every active listing and blocks login immediately. This can be reversed by an administrator if needed.`, confirmLabel:'Delete', onConfirm: async ()=>{
+      const res = await platformApiDelete(`/admin/users/${u.id}`);
+      if(res.ok){ await loadUsersAdmin(); showToast(`${u.name} deleted`, true); renderPage(); }
+      else { showToast(res.data?.message || 'Could not delete this account.', true); }
+    }}); break; }
 
     /* assessment management — quiz management */
     case 'open-quiz-wizard': openQuizModal(); break;
@@ -3717,16 +4212,7 @@ document.addEventListener('click', function(e){
     case 'validate-quiz-result': validateQuizResultAdmin(idx); break;
 
     /* placement rules / interventions / settings / profile */
-    case 'save-rules': showToast('Placement readiness rules saved'); break;
-    case 'run-cohort-backfill': {
-      t.disabled = true; const originalLabel = t.innerHTML; t.innerHTML = 'Syncing…';
-      (async () => {
-        const res = await platformApiPost('/admin/student-cohort/backfill', {});
-        t.disabled = false; t.innerHTML = originalLabel;
-        showToast(res.ok ? res.data.message : (res.data.message || 'Could not run the cohort sync.'));
-      })();
-      break;
-    }
+    case 'save-rules': saveCohortRules(el); break;
     case 'add-intervention': openConfirm({icon:'puzzle', title:'New intervention', message:'This opens the intervention creation form.', confirmLabel:'Got it', onConfirm:()=>{}}); break;
     case 'edit-intervention': openConfirm({icon:'edit', title:`Edit ${INTERVENTIONS[idx].name}`, message:'This opens the intervention edit form.', confirmLabel:'Got it', onConfirm:()=>{}}); break;
     case 'delete-intervention': openConfirm({icon:'trash', danger:true, title:'Delete this intervention?', message:'This cannot be undone.', confirmLabel:'Delete', onConfirm:()=>{ INTERVENTIONS.splice(idx,1); showToast('Intervention deleted', true); renderPage(); }}); break;
@@ -3734,13 +4220,19 @@ document.addEventListener('click', function(e){
     /* intervention management — sessions */
     case 'open-session-modal': openSessionModal(); break;
     case 'edit-session': openSessionModal(WORKSHOP_SESSIONS[idx]); break;
-    case 'view-session-history': { const w=WORKSHOP_SESSIONS[idx]; openConfirm({icon:'activity', title:`${w.name} — history`, message:`${w.college} · ${w.trainer} · ${w.cohort} · ${w.date}, ${w.time} at ${w.venue}. Status: ${w.status}.`, confirmLabel:'Close', onConfirm:()=>{}}); break; }
-    case 'delete-session': { const w=WORKSHOP_SESSIONS[idx]; openConfirm({icon:'trash', danger:true, title:'Delete this session?', message:`${w.name} will be permanently removed. This cannot be undone.`, confirmLabel:'Delete', onConfirm:()=>{ WORKSHOP_SESSIONS.splice(idx,1); showToast('Session deleted', true); renderPage(); }}); break; }
+    case 'view-session-history': { const w=WORKSHOP_SESSIONS[idx]; const colleges=(w.colleges||[]).join(', ')||w.college||'—'; const trainers=(w.trainers||[]).join(', ')||w.trainer||'—'; const departments=(w.departments||[]).join(', ')||'—'; openConfirm({icon:'activity', title:`${w.name} — history`, message:`${colleges} · ${trainers} · ${departments} · ${w.cohort} · ${w.date}, ${w.time} at ${w.venue}. Attendance: ${w.attendanceRequirement==='mandatory'?'Mandatory':'Optional'}. Status: ${w.status}.`, confirmLabel:'Close', onConfirm:()=>{}}); break; }
+    case 'delete-session': { const w=WORKSHOP_SESSIONS[idx]; openConfirm({icon:'trash', danger:true, title:'Delete this session?', message:`${w.name} will be permanently removed. This cannot be undone.`, confirmLabel:'Delete', onConfirm: async ()=>{ const res = await platformApiDelete(`/interventions/sessions/${w.id}`); if(!res.ok){ showToast(res.data.message || 'Could not delete this session.', true); return; } showToast('Session deleted', true); await loadWorkshopSessions(); renderPage(); }}); break; }
 
-    /* attendance oversight */
-    case 'att-mark': { const sid=el.dataset.sid, state=el.dataset.state; ATT_MARK_STATE.marks[sid]=state; el.closest('tr').querySelectorAll('.sa-att-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); document.querySelector('.panel-foot .mono').textContent = `${Object.keys(ATT_MARK_STATE.marks).length} of ${STUDENTS.filter(s=>s.college===ATT_MARK_STATE.college).length} marked`; break; }
-    case 'att-save': { const n=Object.keys(ATT_MARK_STATE.marks).length; if(!n){ showToast('Mark at least one student first', true); break; } const counts={present:0,absent:0,late:0,excused:0}; Object.values(ATT_MARK_STATE.marks).forEach(s=>counts[s]=(counts[s]||0)+1); ATTENDANCE_RECORDS.unshift({ id:'att'+(ATTENDANCE_RECORDS.length+1), date:'Jul 28, 2026', college:ATT_MARK_STATE.college, trainer:'\u2014', cohort:'All Cohorts', total:n, present:counts.present, absent:counts.absent, late:counts.late, excused:counts.excused||0, markedBy:'Nora Whitfield (Super Admin)' }); showToast(`Attendance saved for ${n} students`); ATT_MARK_STATE={college:ATT_MARK_STATE.college,marks:{}}; renderPage(); break; }
-    case 'view-attendance-record': { const a=ATTENDANCE_RECORDS[idx]; openConfirm({icon:'check', title:`Attendance — ${a.college}`, message:`${a.date} · ${a.cohort} · Marked by ${a.markedBy}. Present: ${a.present}, Absent: ${a.absent}, Late: ${a.late}, Excused: ${a.excused} of ${a.total} students.`, confirmLabel:'Close', onConfirm:()=>{}}); break; }
+    /* attendance oversight — DB-driven mark & view screens */
+    case 'att-go-mark': { enterAttendancePage('attendance-mark'); break; }
+    case 'att-go-records': { enterAttendancePage('attendance-records'); break; }
+    case 'att-back': { goPage('attendance'); break; }
+    case 'att-fetch': { fetchAttendanceStudents(); break; }
+    case 'att-mark': { const sid=el.dataset.sid, state=el.dataset.state; ATT_MARK.marks[sid]=state; el.closest('tr').querySelectorAll('.sa-att-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); const cnt=document.getElementById('attMarkCount'); if(cnt) cnt.textContent = `${Object.keys(ATT_MARK.marks).length} of ${ATT_MARK.students.length} marked`; break; }
+    case 'att-save': { saveAttendance(); break; }
+    case 'att-apply-view': { loadAttendanceRecords(); break; }
+    case 'att-export-excel': { attExportExcel(); break; }
+    case 'att-print': { attPrint(); break; }
 
     case 'save-settings': showToast('Settings saved'); break;
     case 'save-profile': saveProfile(); break;
@@ -3765,10 +4257,20 @@ document.addEventListener('input', function(e){
   const t = e.target;
   if(t.id==='collegeSearch'){ applyRowFilter('#collegeGrid','.entity-card', t.value, 'collegeStatusFilter'); }
   if(t.id==='deptSearch'){ applyRowFilter('#deptTable','tbody tr', t.value); }
-  if(t.id==='userSearch'){ applyRowFilter('#userTable','tbody tr', t.value, 'userStatusFilter'); }
+  if(t.id==='userSearch'){
+    STATE.filters.userSearch = t.value;
+    clearTimeout(window._userSearchDebounce);
+    window._userSearchDebounce = setTimeout(async () => {
+      await loadUsersAdmin();
+      const caret = t.selectionStart;
+      renderPage();
+      const el = document.getElementById('userSearch');
+      if(el){ el.focus(); el.setSelectionRange(caret, caret); }
+    }, 350);
+  }
   if(t.id==='auditSearch'){ applyRowFilter('#auditTable','tbody tr', t.value); }
+  if(t.id==='ruleAssessWeight' || t.id==='ruleInterviewWeight'){ updatePlacementRuleValidation(); }
   if(t.id==='globalSearch' && t.value.length>1){ /* lightweight cross-entity hint only */ }
-  if(t.id==='trainerSearch'){ applyMultiFilter('#trainerTable','tbody tr','trainerSearch',{trainerStatusFilter:'status'}); }
   if(t.id==='quizSearch'){ applyMultiFilter('#quizTable','tbody tr','quizSearch',{quizCollegeFilter:'college',quizTrainerFilter:'trainer',quizStatusFilter:'status'}); }
   if(t.id==='sessionSearch'){ applyMultiFilter('#sessionGrid','.entity-card','sessionSearch',{sessionCollegeFilter:'college',sessionStatusFilter:'status'}); }
   if(t.id==='interviewSearch'){ applyRowFilter('#interviewTable','tbody tr', t.value); }
@@ -3824,12 +4326,14 @@ document.addEventListener('input', function(e){
 document.addEventListener('change', function(e){
   const t = e.target;
   if(t.id==='collegeStatusFilter'){ applyRowFilter('#collegeGrid','.entity-card', document.getElementById('collegeSearch')?.value, 'collegeStatusFilter'); }
-  if(t.id==='userStatusFilter'){ applyRowFilter('#userTable','tbody tr', document.getElementById('userSearch')?.value, 'userStatusFilter'); }
-  if(t.id==='trainerStatusFilter'){ applyMultiFilter('#trainerTable','tbody tr','trainerSearch',{trainerStatusFilter:'status'}); }
+  if(t.id==='userStatusFilter'){
+    STATE.filters.userStatus = t.value;
+    (async () => { await loadUsersAdmin(); renderPage(); })();
+  }
   if(['quizCollegeFilter','quizTrainerFilter','quizStatusFilter'].includes(t.id)){ applyMultiFilter('#quizTable','tbody tr','quizSearch',{quizCollegeFilter:'college',quizTrainerFilter:'trainer',quizStatusFilter:'status'}); }
   if(['sessionCollegeFilter','sessionStatusFilter'].includes(t.id)){ applyMultiFilter('#sessionGrid','.entity-card','sessionSearch',{sessionCollegeFilter:'college',sessionStatusFilter:'status'}); }
-  if(['attViewCollege','attViewTrainer'].includes(t.id)){ applyMultiFilter('#attRecordsTable','tbody tr',null,{attViewCollege:'college',attViewTrainer:'trainer'}); }
-  if(t.id==='attMarkCollege'){ STATE.filters.attCollege = t.value; ATT_MARK_STATE = {college:t.value, marks:{}}; renderPage(); }
+  if(t.id==='attMarkDate'){ ATT_MARK.date = t.value; }
+  if(t.id==='attViewDate'){ ATT_VIEW.date = t.value; }
   if(t.dataset && t.dataset.action==='resp-filter'){
     STATE.respFilters[t.dataset.key] = t.value;
     (async () => {
@@ -3953,50 +4457,97 @@ function saveTrainerColleges(id){
 
 
 /* ============================================================
-   INTERVENTION MANAGEMENT — Schedule Session modal (mirrors
-   Trainer "Schedule Workshop")
+   INTERVENTION MANAGEMENT — Schedule Session modal.
+   College / Department / Trainer are all multi-select checkbox lists,
+   fetched live from MANAGED_COLLEGES / DEPARTMENTS / TRAINERS (never
+   hardcoded). Session Type and Maximum Students no longer exist;
+   Attendance Requirement (Mandatory/Optional) replaces Maximum
+   Students. Save posts straight to the real
+   POST /admin/interventions/schedule (create) or
+   PATCH /admin/interventions/sessions/<id> (edit) endpoints — see
+   superadmin.py.
 ============================================================ */
 function openSessionModal(existing){
   const e = existing || {};
+  const selectedColleges = new Set((e.collegeIds||[]).map(String));
+  const selectedDepts = new Set((e.departmentIds||[]).map(String));
+  const selectedTrainers = new Set((e.trainerIds||[]).map(String));
+  const activeColleges = MANAGED_COLLEGES.filter(c=>c.status==='active');
+  const activeTrainers = TRAINERS.filter(t=>t.status!=='suspended');
+
+  const collegeRows = activeColleges.length ? activeColleges.map(c=>`
+    <label class="sa-college-check-row">
+      <input type="checkbox" class="ws-college-cb" value="${c.id}" ${selectedColleges.has(String(c.id))?'checked':''}>
+      <span>${esc(c.collegeName)}</span>
+    </label>`).join('') : `<p style="font-size:12.5px;color:var(--text-faint);padding:6px 0;">No active colleges available.</p>`;
+
+  const deptRows = DEPARTMENTS.length ? DEPARTMENTS.map(d=>`
+    <label class="sa-college-check-row">
+      <input type="checkbox" class="ws-dept-cb" value="${d.id}" ${selectedDepts.has(String(d.id))?'checked':''}>
+      <span>${esc(d.name)} <span style="color:var(--text-faint);">(${esc(d.college)})</span></span>
+    </label>`).join('') : `<p style="font-size:12.5px;color:var(--text-faint);padding:6px 0;">No departments available.</p>`;
+
+  const trainerRows = activeTrainers.length ? activeTrainers.map(t=>`
+    <label class="sa-college-check-row">
+      <input type="checkbox" class="ws-trainer-cb" value="${t.id}" ${selectedTrainers.has(String(t.id))?'checked':''}>
+      <span>${esc(t.name)} <span style="color:var(--text-faint);">(${esc(t.email||'—')})</span></span>
+    </label>`).join('') : `<p style="font-size:12.5px;color:var(--text-faint);padding:6px 0;">No trainers available.</p>`;
+
+  const cohortOpts = ['All Cohorts','Cohort A','Cohort B','Cohort C'];
   const body = `
-    <div class="sa-field"><label>Session Type</label><select id="wsType"><option ${e.type==='Communication Workshop'?'selected':''}>Communication Workshop</option><option ${e.type==='Interview Session'?'selected':''}>Interview Session</option><option ${e.type==='Coding Session'?'selected':''}>Coding Session</option><option ${e.type==='Resume Workshop'?'selected':''}>Resume Workshop</option><option ${e.type==='GD Practice'?'selected':''}>GD Practice</option></select></div>
     <div class="sa-field"><label>Session Name</label><input type="text" id="wsName" value="${esc(e.name||'')}" placeholder="e.g. Mock Interview Bootcamp"></div>
+    <div class="sa-field"><label>College</label><div class="sa-college-check-list" style="max-height:150px;">${collegeRows}</div></div>
+    <div class="sa-field"><label>Department</label><div class="sa-college-check-list" style="max-height:170px;">${deptRows}</div></div>
+    <div class="sa-field"><label>Trainer</label><div class="sa-college-check-list" style="max-height:150px;">${trainerRows}</div></div>
     <div class="sa-row-2">
-      <div class="sa-field"><label>College</label><select id="wsCollege">${COLLEGES.map(c=>`<option ${e.college===c.name?'selected':''}>${c.name}</option>`).join('')}</select></div>
-      <div class="sa-field"><label>Trainer</label><select id="wsTrainer">${TRAINERS.map(t=>`<option ${e.trainer===t.name?'selected':''}>${t.name}</option>`).join('')}</select></div>
+      <div class="sa-field"><label>Applicable Cohort</label><select id="wsCohort">${cohortOpts.map(c=>`<option ${(e.cohort||'All Cohorts')===c?'selected':''}>${c}</option>`).join('')}</select></div>
+      <div class="sa-field"><label>Attendance Requirement</label><select id="wsAttendance"><option value="mandatory" ${e.attendanceRequirement==='mandatory'?'selected':''}>Mandatory</option><option value="optional" ${e.attendanceRequirement!=='mandatory'?'selected':''}>Optional</option></select></div>
     </div>
-    <div class="sa-field"><label>Applicable Cohort</label><select id="wsCohort"><option>Cohort A</option><option>Cohort B</option><option>Cohort C</option><option>All Cohorts</option></select></div>
     <div class="sa-row-3">
-      <div class="sa-field"><label>Date</label><input type="date" id="wsDate" value="2026-07-30"></div>
-      <div class="sa-field"><label>Start Time</label><input type="time" id="wsStart" value="14:00"></div>
-      <div class="sa-field"><label>End Time</label><input type="time" id="wsEnd" value="16:00"></div>
+      <div class="sa-field"><label>Date</label><input type="date" id="wsDate" value="${esc(e.date||'2026-07-30')}"></div>
+      <div class="sa-field"><label>Start Time</label><input type="time" id="wsStart" value="${esc(e.startTime||'14:00')}"></div>
+      <div class="sa-field"><label>End Time</label><input type="time" id="wsEnd" value="${esc(e.endTime||'16:00')}"></div>
     </div>
-    <div class="sa-row-2">
-      <div class="sa-field"><label>Venue</label><input type="text" id="wsVenue" value="${esc(e.venue||'')}" placeholder="e.g. Seminar Hall 2"></div>
-      <div class="sa-field"><label>Maximum Students</label><input type="number" id="wsSeats" value="${e.seats||60}"></div>
-    </div>`;
-  const foot = `<button class="btn btn-ghost" data-action="close-big-modal">Cancel</button><button class="btn btn-primary" data-action="save-session" data-existing="${existing?WORKSHOP_SESSIONS.indexOf(existing):''}">${existing?'Save Changes':'Schedule Session'}</button>`;
+    <div class="sa-field"><label>Venue</label><input type="text" id="wsVenue" value="${esc(e.venue||'')}" placeholder="e.g. Seminar Hall 2"></div>
+    <p id="wsError" style="color:var(--rose-dark,#b91c1c);font-size:12.5px;display:none;margin-top:4px;"></p>`;
+  const foot = `<button class="btn btn-ghost" data-action="close-big-modal">Cancel</button><button class="btn btn-primary" data-action="save-session" data-id="${e.id||''}">${existing?'Save Changes':'Schedule Session'}</button>`;
   openBigModal(existing?'Edit Session':'Schedule Session', body, foot, true);
 }
-document.addEventListener('click', function(e){
+document.addEventListener('click', async function(e){
   const el = e.target.closest('[data-action="save-session"]'); if(!el) return;
-  const idx = el.dataset.existing;
-  const rec = {
-    name: document.getElementById('wsName').value || 'Untitled Session',
-    type: document.getElementById('wsType').value,
-    college: document.getElementById('wsCollege').value,
-    trainer: document.getElementById('wsTrainer').value,
-    cohort: document.getElementById('wsCohort').value,
-    date: document.getElementById('wsDate').value || '2026-07-30',
-    time: (document.getElementById('wsStart').value||'')+' \u2013 '+(document.getElementById('wsEnd').value||''),
-    venue: document.getElementById('wsVenue').value || 'TBD',
-    seats: parseInt(document.getElementById('wsSeats').value)||0,
-    status: 'scheduled',
-  };
-  if(idx!==''){ Object.assign(WORKSHOP_SESSIONS[idx], rec); showToast('Session updated'); }
-  else { WORKSHOP_SESSIONS.unshift({id:'w'+(WORKSHOP_SESSIONS.length+1), ...rec}); showToast('Session scheduled — POST /admin/interventions/schedule', '✓'); }
+  const id = el.dataset.id;
+  const errEl = document.getElementById('wsError');
+  const showErr = msg => { if(errEl){ errEl.textContent = msg; errEl.style.display='block'; } };
+  if(errEl) errEl.style.display = 'none';
+
+  const name = (document.getElementById('wsName').value||'').trim();
+  const collegeIds = Array.from(document.querySelectorAll('.ws-college-cb:checked')).map(c=>c.value);
+  const departmentIds = Array.from(document.querySelectorAll('.ws-dept-cb:checked')).map(c=>c.value);
+  const trainerIds = Array.from(document.querySelectorAll('.ws-trainer-cb:checked')).map(c=>c.value);
+  const cohort = document.getElementById('wsCohort').value;
+  const date = document.getElementById('wsDate').value;
+  const startTime = document.getElementById('wsStart').value;
+  const endTime = document.getElementById('wsEnd').value;
+  const venue = (document.getElementById('wsVenue').value||'').trim();
+  const attendanceRequirement = document.getElementById('wsAttendance').value;
+
+  if(!name){ showErr('Session name is required.'); return; }
+  if(!collegeIds.length){ showErr('Select at least one college.'); return; }
+  if(!departmentIds.length){ showErr('Select at least one department.'); return; }
+  if(!trainerIds.length){ showErr('Select at least one trainer.'); return; }
+  if(!date || !startTime || !endTime){ showErr('Date, start time and end time are required.'); return; }
+  if(endTime<=startTime){ showErr('End Time must be after Start Time.'); return; }
+  if(!venue){ showErr('Venue is required.'); return; }
+
+  const payload = { name, collegeIds, departmentIds, trainerIds, cohort, date, startTime, endTime, venue, attendanceRequirement };
+  el.disabled = true;
+  const res = id ? await platformApiPatch(`/interventions/sessions/${id}`, payload) : await platformApiPost('/interventions/schedule', payload);
+  el.disabled = false;
+  if(!res.ok){ showErr(res.data.message || 'Could not save this session.'); return; }
   closeBigModal();
+  showToast(id ? 'Session updated' : 'Session scheduled');
   STATE.tab.interventions = 'sessions';
+  await loadWorkshopSessions();
   renderPage();
 });
 

@@ -490,6 +490,11 @@ def init_auth(bcrypt, db, limiter, jwt, firebase_ready=False):
             "approvedBy": None,
             "approvedDate": None,
             "googleLogin": False,
+            # Soft-delete flag — never set at registration time, only by
+            # the Super Admin's "Delete" action (see superadmin.py
+            # soft_delete_user). login() below rejects any account where
+            # this is true, before it even looks at approvalStatus.
+            "isDeleted": False,
             # Students start in Entry Level: cohort is None until BOTH their
             # baseline assessment AND manual interview are scored (see
             # quiz_common.check_and_generate_cohort in the quiz engine).
@@ -557,6 +562,12 @@ def init_auth(bcrypt, db, limiter, jwt, firebase_ready=False):
 
         if normalize_role(user["role"]) != selected_role:
             return error("Wrong role selected.")
+
+        # Soft-deleted accounts are rejected outright, before the
+        # approvalStatus checks below — a deleted user should never be
+        # able to log in again unless a Super Admin restores the record.
+        if user.get("isDeleted"):
+            return error("This account has been deleted. Contact the administrator.", 403)
 
         status = user.get("approvalStatus")
         if status == "pending":

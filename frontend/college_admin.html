@@ -41,6 +41,14 @@
 
   --text:var(--slate-900); --text-soft:var(--slate-700); --text-faint:var(--slate-500);
 
+  /* Fixed dark chrome surface (sidebar, toast, active pills, dashboard
+     hero) — intentionally stays dark in BOTH themes, unlike --ink below
+     which is redefined per-theme for foreground/icon contrast use. */
+  --ink-fixed:      #1B140C;
+  /* Warning chip/icon text needs a different shade per theme to stay
+     readable against its translucent amber tint background. */
+  --warn-text:      #96700E;
+
   --font-display: 'Space Grotesk', 'Inter', sans-serif;
   --font-body:    'Inter', sans-serif;
   --font-mono:    'JetBrains Mono', monospace;
@@ -67,6 +75,7 @@
   --paper:#17120C; --paper-raised:#221B12; --paper-alt:#1E1810;
   --line:#3A2F20;
   --text:#F5EEE2; --text-soft:#C9BCA6; --text-faint:#8C8070;
+  --warn-text: var(--warn);
   --shadow-sm: 0 4px 14px -8px rgba(0,0,0,0.5);
   --shadow-md: 0 24px 44px -22px rgba(0,0,0,0.55);
   --shadow-lg: 0 40px 80px -32px rgba(0,0,0,0.65);
@@ -128,7 +137,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .admin-shell{ display:flex; min-height:100vh; }
 
 .sidebar{
-  width:var(--sidebar-w); flex:none; background:var(--ink); color:#FBF3E7;
+  width:var(--sidebar-w); flex:none; background:var(--ink-fixed); color:#FBF3E7;
   display:flex; flex-direction:column; position:sticky; top:0; height:100vh; z-index:200;
   transition:width var(--transition), transform var(--transition); overflow:hidden;
 }
@@ -224,7 +233,7 @@ html.no-scroll, html.no-scroll body{ overflow:hidden; height:100%; }
 /* chips / badges ---------------------------------------------*/
 .chip{ display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:700; padding:4px 11px; border-radius:100px; font-family:var(--font-mono); letter-spacing:.02em; white-space:nowrap; }
 .chip-ready{ background:rgba(31,158,115,0.13); color:var(--ready); }
-.chip-warn{ background:rgba(240,180,41,0.16); color:#96700E; }
+.chip-warn{ background:rgba(240,180,41,0.16); color:var(--warn-text); }
 .chip-risk{ background:rgba(232,86,63,0.13); color:var(--risk); }
 .chip-neutral{ background:var(--paper-alt); color:var(--text-soft); }
 .chip-info{ background:rgba(31,158,147,0.13); color:var(--cyan); }
@@ -250,7 +259,7 @@ table.dt tbody tr:hover{ background:var(--paper-alt); }
 .tag-filter{ display:flex; gap:8px; flex-wrap:wrap; }
 .pagination{ display:flex; align-items:center; gap:6px; justify-content:flex-end; padding:14px 16px; font-size:12.5px; color:var(--text-soft); }
 .page-btn{ width:30px; height:30px; border-radius:8px; border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; }
-.page-btn.active{ background:var(--ink); color:#fff; border-color:var(--ink); }
+.page-btn.active{ background:var(--ink-fixed); color:#fff; border-color:var(--ink-fixed); }
 
 /* tabs --------------------------------------------------------*/
 .tabbar{ display:flex; gap:6px; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:0; }
@@ -263,7 +272,7 @@ table.dt tbody tr:hover{ background:var(--paper-alt); }
 /* pills subnav (module sub-sections) */
 .subnav{ display:flex; gap:8px; flex-wrap:wrap; }
 .subnav a, .subnav button{ padding:8px 15px; border-radius:100px; font-size:12.5px; font-weight:600; border:1px solid var(--line); background:var(--paper-raised); color:var(--text-soft); }
-.subnav a.active, .subnav button.active{ background:var(--ink); color:#fff; border-color:var(--ink); }
+.subnav a.active, .subnav button.active{ background:var(--ink-fixed); color:#fff; border-color:var(--ink-fixed); }
 
 /* progress bars -------------------------------------------------*/
 .pbar{ height:8px; border-radius:100px; background:var(--paper-alt); overflow:hidden; }
@@ -318,7 +327,7 @@ table.dt tbody tr:hover{ background:var(--paper-alt); }
 
 /* toast ---------------------------------------------------------------*/
 .toast-container{ position:fixed; top:20px; right:20px; z-index:999; display:flex; flex-direction:column; gap:10px; }
-.toast{ background:var(--ink); color:#fff; padding:13px 18px; border-radius:12px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:10px; box-shadow:var(--shadow-lg); animation:toastIn .35s var(--ease-soft); max-width:340px; }
+.toast{ background:var(--ink-fixed); color:#fff; padding:13px 18px; border-radius:12px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:10px; box-shadow:var(--shadow-lg); animation:toastIn .35s var(--ease-soft); max-width:340px; }
 .toast.success .icon{ color:var(--ready); } .toast.error .icon{ color:var(--risk); } .toast.info .icon{ color:var(--violet); }
 @keyframes toastIn{ from{ opacity:0; transform:translateX(30px);} to{ opacity:1; transform:none;} }
 
@@ -348,7 +357,7 @@ table.dt tbody tr:hover{ background:var(--paper-alt); }
 .rule-ic{ width:40px; height:40px; border-radius:11px; display:flex; align-items:center; justify-content:center; flex:none; }
 
 /* dashboard hero + kpi strip -------------------------------------------*/
-.dash-hero{ position:relative; overflow:hidden; border-radius:var(--radius-lg); background:linear-gradient(120deg, var(--ink) 0%, #3A2410 55%, var(--blue-deep) 130%); color:#FBF3E7; padding:34px 38px; display:flex; align-items:center; gap:28px; justify-content:space-between; }
+.dash-hero{ position:relative; overflow:hidden; border-radius:var(--radius-lg); background:linear-gradient(120deg, var(--ink-fixed) 0%, #3A2410 55%, var(--blue-deep) 130%); color:#FBF3E7; padding:34px 38px; display:flex; align-items:center; gap:28px; justify-content:space-between; }
 .dash-hero-left{ position:relative; z-index:2; max-width:520px; }
 .dash-hero-left .eyebrow{ color:var(--violet); }
 .dash-hero-left h1{ font-size:28px; color:#fff; margin:10px 0 8px; }
@@ -371,7 +380,7 @@ table.dt tbody tr:hover{ background:var(--paper-alt); }
 
 .action-item{ display:flex; gap:12px; align-items:flex-start; padding:12px; border-radius:12px; border:1px solid var(--line); margin-bottom:8px; }
 .action-item.urgent{ border-color:rgba(232,86,63,0.35); background:rgba(232,86,63,0.05); }
-.action-item .a-ic{ width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex:none; background:rgba(240,180,41,0.18); color:#96700E; }
+.action-item .a-ic{ width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex:none; background:rgba(240,180,41,0.18); color:var(--warn-text); }
 .action-item.urgent .a-ic{ background:rgba(232,86,63,0.16); color:var(--risk); }
 
 th.sortable{ cursor:pointer; user-select:none; }
@@ -491,9 +500,22 @@ function fmtDateTime(iso){
   if(isNaN(d.getTime())) return '—';
   return d.toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
 }
+// Date-only formatter — safe for both ISO timestamps and plain
+// "YYYY-MM-DD" strings (e.g. db.attendance's `date` field), which
+// `new Date(...)` would otherwise parse as UTC midnight and can
+// shift a day off depending on the viewer's timezone.
+function fmtDate(dateStr){
+  if(!dateStr) return '—';
+  const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(!m) return '—';
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if(isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
 
 function statusChip(status){
   const map = {
+    A:['chip-ready','Cohort A · Placement Ready'], B:['chip-warn','Cohort B · Near Ready'], C:['chip-risk','Cohort C · High Risk'], entry_level:['chip-neutral','Entry Level'],
     ready:['chip-ready','Placement Ready'], near:['chip-warn','Near Ready'], risk:['chip-risk','High Risk'], commdef:['chip-info','Communication Deficit'], intdef:['chip-warn','Interview Deficit'],
     active:['chip-ready','Active'], pending:['chip-warn','Pending Approval'], suspended:['chip-risk','Suspended'], inactive:['chip-neutral','Inactive'],
     published:['chip-ready','Published'], draft:['chip-warn','Draft'], archived:['chip-neutral','Archived'],
@@ -656,17 +678,27 @@ function mkStudent(o){
 // GET /api/students — each item is built via mkStudent({ id, name, reg, dept, year, section, email, phone,
 // comm, tech, apt, prof, interview, prog, logic, verbal, quant, resume, behavior, soft, ai, improvement,
 // cohort, assessmentStatus, trainer, attendance, lastActivity, inactive, photo })
-const STUDENTS = [];
-STUDENTS.forEach((s,i)=>{ s.idx=i; s.inactive = s.inactive||false; s.photo = s.photo||null; });
+// GET /api/collegeadmin/students — LIVE, never mocked. Each item's `status`
+// (and `cohort`) is exactly the A/B/C/entry_level value currently stored on
+// db.users.cohort for that student — the SAME field Student, Trainer, and
+// Super Admin dashboards read. There is no local recomputation of cohort
+// here: whatever the Super Admin's Placement Rules last assigned is what
+// renders, on every page load, with no caching between loads.
+let STUDENTS = [];
 
+// Cohort buckets mirror the platform-wide Placement Rules engine exactly:
+// Cohort A (Placement Ready) / Cohort B (Near Ready) / Cohort C (High Risk),
+// plus Entry Level for students who haven't been scored yet. These are NOT
+// independently-invented thresholds — the underlying assignment always
+// comes from the Super Admin's live db.placement_rules via the shared
+// backend cohort engine; this table only supplies display metadata.
 const COHORT_RULES = [
-  { key:'ready', label:'Placement Ready', icon:'shieldCheck', color:'var(--ready)', rule:'Communication ≥ 70 AND Interview ≥ 75 AND Professionalism ≥ 75 AND Overall ≥ 75' },
-  { key:'commdef', label:'Communication Deficit', icon:'message', color:'var(--cyan)', rule:'Communication < 70 while other scores remain moderate to strong' },
-  { key:'intdef', label:'Interview & Confidence Deficit', icon:'video', color:'var(--violet)', rule:'Interview Readiness < 75 while other scores remain moderate to strong' },
-  { key:'risk', label:'High Risk', icon:'alert', color:'var(--risk)', rule:'Overall Employability Score below 60 across multiple assessment cycles' },
+  { key:'A', label:'Cohort A · Placement Ready', icon:'shieldCheck', color:'var(--ready)', rule:'Final Employability Score meets or exceeds the Cohort A threshold currently configured in Placement Rules.' },
+  { key:'B', label:'Cohort B · Near Ready', icon:'trendUp', color:'var(--warn, var(--violet))', rule:'Final Employability Score meets the Cohort B threshold but is below the Cohort A threshold.' },
+  { key:'C', label:'Cohort C · High Risk', icon:'alert', color:'var(--risk)', rule:'Final Employability Score is below the Cohort B threshold currently configured in Placement Rules.' },
+  { key:'entry_level', label:'Entry Level', icon:'user', color:'var(--text-faint, #9a8f80)', rule:'Baseline assessment score and/or interview score not yet recorded — cohort not generated yet.' },
 ];
 function cohortStudents(key){
-  if(key==='risk') return STUDENTS.filter(s=>s.status==='risk' || s.overall<50);
   return STUDENTS.filter(s=>s.status===key);
 }
 
@@ -828,6 +860,66 @@ async function loadAssessments(force=false){
   if(STATE.page==='assessments') renderPage();
 }
 
+/* ============================================================
+   STUDENTS / COHORTS — REAL BACKEND CLIENT
+   Every cohort shown anywhere on this dashboard (Dashboard KPIs,
+   Student Management, Cohort Management, Analytics) is loaded here,
+   fresh, from GET /api/collegeadmin/students — never cached beyond
+   the current page view, and never recomputed on the frontend.
+   Re-running loadStudents(true) (e.g. after a manual refresh, or
+   whenever the admin lands on a cohort-related page) guarantees no
+   page can show a cohort that has since changed on the server, such
+   as right after a Super Admin edits Placement Rules.
+============================================================ */
+let studentsLoaded = false;
+let studentsLoading = false;
+function _mapStudentFromApi(s){
+  const cohort = s.cohort || 'entry_level'; // 'A' | 'B' | 'C' | 'entry_level' — straight from db.users.cohort
+  const scored = s.baselineAssessmentScore != null && s.interviewScore != null;
+  // Real attendance straight from the roster payload (computed server-side
+  // from db.attendance, the same shared source the Student Dashboard uses).
+  const attTotal = s.attendanceTotal ?? 0;
+  const attPresent = s.attendancePresent ?? 0;
+  const attAbsent = s.attendanceAbsent ?? 0;
+  const attPct = attTotal ? Math.round((attPresent / attTotal) * 100) : 0;
+  return {
+    id: s.id,
+    name: s.name || '(No name on file)',
+    reg: s.rollNumber || '—',
+    dept: s.department || 'Unassigned',
+    year: '—',
+    section: '—',
+    email: s.email || '—',
+    phone: '—',
+    overall: s.finalEmployabilityScore != null ? Math.round(s.finalEmployabilityScore) : 0,
+    cohort: (COHORT_RULES.find(r=>r.key===cohort)||{}).label || cohort,
+    status: cohort,                 // one of COHORT_RULES[].key — drives every filter/chip
+    assessmentStatus: scored ? 'completed' : 'scheduled',
+    trainer: '—',
+    attendance: attPct,
+    attendanceTotal: attTotal,
+    attendancePresent: attPresent,
+    attendanceAbsent: attAbsent,
+    attendanceLastUpdated: s.attendanceLastUpdated,
+    improvement: 0,
+    inactive: false,
+    photo: null,
+    idx: 0,
+  };
+}
+async function loadStudents(force=false){
+  if((studentsLoaded && !force) || studentsLoading) return;
+  studentsLoading = true;
+  const { ok, data } = await collegeAdminApi('/students');
+  studentsLoading = false;
+  studentsLoaded = true;
+  if(ok && Array.isArray(data.students)){
+    STUDENTS = data.students.map(_mapStudentFromApi);
+    STUDENTS.forEach((s,i)=>{ s.idx=i; });
+  }
+  if(['dashboard','students','student-profile','cohorts','analytics'].includes(STATE.page)) renderPage();
+}
+
 const ASSESSMENT_RESPONSES_CACHE = {};
 async function loadAssessmentResponses(assessmentId, force=false){
   if(!force && ASSESSMENT_RESPONSES_CACHE[assessmentId]) return ASSESSMENT_RESPONSES_CACHE[assessmentId];
@@ -857,6 +949,7 @@ const NAV = [
   ]},
   { section:'Measurement', items:[
     {key:'assessments', label:'Assessment Management', icon:'fileText'},
+    {key:'attendance', label:'Attendance', icon:'calendar'},
     {key:'cohorts', label:'Cohorts', icon:'target'},
     {key:'interventions', label:'Interventions', icon:'puzzle'},
   ]},
@@ -878,6 +971,7 @@ const PAGE_META = {
   departments:{ title:'Department Management', crumb:'People' },
   assessments:{ title:'Assessment Management', crumb:'Measurement' },
   'assessment-responses':{ title:'Student Responses', crumb:'Measurement / Assessment Management' },
+  attendance:{ title:'Attendance', crumb:'Measurement' },
   cohorts:{ title:'Cohort Management', crumb:'Measurement' },
   interventions:{ title:'Intervention Management', crumb:'Measurement' },
   reports:{ title:'Reports', crumb:'Insights' },
@@ -990,6 +1084,11 @@ function closeMobileSidebar(){
 }
 function goPage(page, params={}){
   STATE.page = page; STATE.params = params;
+  // Always re-pull the student roster when landing on any page that shows
+  // attendance, so the Attendance module (totals on Student Details, the
+  // Student Management table, cohort views) auto-refreshes to whatever the
+  // Super Admin most recently marked — never a stale cached snapshot.
+  if(['dashboard','students','student-profile','cohorts','analytics'].includes(page)) loadStudents(true);
   renderPage();
   if(document.getElementById('sidebar')?.classList.contains('mobile-open')) closeMobileSidebar();
   window.scrollTo({top:0, behavior:'smooth'});
@@ -1021,6 +1120,7 @@ function renderPage(){
     departments: pageDepartments,
     assessments: pageAssessments,
     'assessment-responses': ()=>pageAssessmentResponses(STATE.params.id),
+    attendance: pageAttendance,
     cohorts: pageCohorts,
     interventions: pageInterventions,
     reports: pageReports,
@@ -1077,9 +1177,9 @@ const KPI_FG = { blue:'var(--blue)', violet:'var(--blue-deep)', cyan:'var(--cyan
 function pct(part, total){ return total ? Math.round(part/total*100) : 0; }
 function dashboardStats(){
   const total = STUDENTS.length;
-  const ready = STUDENTS.filter(s=>s.status==='ready').length;
-  const near = STUDENTS.filter(s=>s.status==='near').length;
-  const risk = STUDENTS.filter(s=>s.status==='risk' || s.overall<50).length;
+  const ready = STUDENTS.filter(s=>s.status==='A').length;
+  const near = STUDENTS.filter(s=>s.status==='B').length;
+  const risk = STUDENTS.filter(s=>s.status==='C').length;
   const avgScore = total ? Math.round(STUDENTS.reduce((a,s)=>a+s.overall,0)/total) : 0;
   const completion = pct(STUDENTS.filter(s=>s.assessmentStatus==='completed').length, total);
   return {total, ready, near, risk, avgScore, completion};
@@ -1127,6 +1227,7 @@ function sortedDeptTable(){
 }
 function riskLevel(d){ return d.highRisk>45?'risk':d.highRisk>25?'near':'ready'; }
 function pageDashboard(){
+  loadStudents();
   const st = dashboardStats();
   const activeAssessments = ASSESSMENTS.filter(a=>a.status==='live'||a.status==='upcoming').length;
 
@@ -1260,6 +1361,7 @@ function filteredStudents(includeInactive){
 }
 function pageStudents(){
   const tab = STATE.tab.students;
+  loadStudents();
   return `
   <div class="section-head">
     <div><h2>Student Management</h2><p>View student records, assessments, and cohort placement for every department.</p></div>
@@ -1294,30 +1396,29 @@ function studentListView(inactive){
           <option value="all">All Sections</option>${['A','B','C'].map(y=>`<option ${f.section===y?'selected':''}>${y}</option>`).join('')}
         </select>
         <select class="filter-select" data-action="filter-students" data-field="status">
-          <option value="all">All Readiness</option>
-          <option value="ready" ${f.status==='ready'?'selected':''}>Placement Ready</option>
-          <option value="near" ${f.status==='near'?'selected':''}>Near Ready</option>
-          <option value="commdef" ${f.status==='commdef'?'selected':''}>Communication Deficit</option>
-          <option value="intdef" ${f.status==='intdef'?'selected':''}>Interview Deficit</option>
-          <option value="risk" ${f.status==='risk'?'selected':''}>High Risk</option>
+          <option value="all">All Cohorts</option>
+          <option value="A" ${f.status==='A'?'selected':''}>Cohort A · Placement Ready</option>
+          <option value="B" ${f.status==='B'?'selected':''}>Cohort B · Near Ready</option>
+          <option value="C" ${f.status==='C'?'selected':''}>Cohort C · High Risk</option>
+          <option value="entry_level" ${f.status==='entry_level'?'selected':''}>Entry Level</option>
         </select>
       </div>
       <span class="cell-sub">${list.length} student${list.length!==1?'s':''} found</span>
     </div>
     <div class="table-wrap">
       <table class="dt">
-        <thead><tr><th>Student</th><th>Department</th><th>Year / Sec</th><th>Email</th><th>Assessment</th><th>Cohort</th><th>Readiness</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Student</th><th>Department</th><th>Year / Sec</th><th>Email</th><th>Assessment</th><th>Readiness</th><th>Actions</th></tr></thead>
         <tbody>
         ${shown.length? shown.map(s=>`
           <tr class="row-clickable" data-action="nav" data-page="student-profile" data-id="${s.id}">
             <td><div style="display:flex;align-items:center;gap:10px;">${avatarChip(s.name,30)}<div><div class="cell-name">${esc(s.name)}</div><div class="cell-sub">${s.reg}</div></div></div></td>
             <td>${s.dept}</td><td>${s.year} · ${s.section}</td><td class="cell-sub">${s.email}</td>
             <td>${statusChip(s.assessmentStatus==='completed'?'completed':s.assessmentStatus==='overdue'?'expired':'scheduled')}</td>
-            <td class="cell-sub">${s.cohort}</td><td>${statusChip(s.status)}</td>
+            <td>${statusChip(s.status)}</td>
             <td onclick="event.stopPropagation()"><div class="row-actions">
               <button class="btn-icon" data-action="nav" data-page="student-profile" data-id="${s.id}" title="View">${ic('eye','icon icon-sm')}</button>
             </div></td>
-          </tr>`).join('') : `<tr><td colspan="8"><div class="empty-state">${ic('users','icon-lg')}<h3>No students found</h3><p>Try adjusting your filters or search terms.</p></div></td></tr>`}
+          </tr>`).join('') : `<tr><td colspan="7"><div class="empty-state">${ic('users','icon-lg')}<h3>No students found</h3><p>Try adjusting your filters or search terms.</p></div></td></tr>`}
         </tbody>
       </table>
       ${list.length?`<div class="pagination">
@@ -1330,9 +1431,10 @@ function studentListView(inactive){
 function studentAnalytics(){
   return `<div class="grid grid-12">
     <div class="card span-4"><h3 style="font-size:15px;margin-bottom:10px;">Readiness Split</h3>${donutSVG([
-      {value:STUDENTS.filter(s=>s.status==='ready').length,color:'var(--ready)'},
-      {value:STUDENTS.filter(s=>s.status==='near').length,color:'var(--warn)'},
-      {value:STUDENTS.filter(s=>s.status==='risk').length,color:'var(--risk)'},
+      {value:STUDENTS.filter(s=>s.status==='A').length,color:'var(--ready)'},
+      {value:STUDENTS.filter(s=>s.status==='B').length,color:'var(--warn, var(--violet))'},
+      {value:STUDENTS.filter(s=>s.status==='C').length,color:'var(--risk)'},
+      {value:STUDENTS.filter(s=>s.status==='entry_level').length,color:'var(--text-faint, #9a8f80)'},
     ],170,24,STUDENTS.length,'STUDENTS')}</div>
     <div class="card span-8"><h3 style="font-size:15px;margin-bottom:10px;">Average Score by Department</h3>${barChartSVG(DEPARTMENTS.map(d=>({label:d.name.split(' ')[0],value:d.avgScore})))}</div>
     <div class="card span-12"><h3 style="font-size:15px;margin-bottom:10px;">Skill Category Averages</h3>${radarSVG(SKILL_CATEGORIES.slice(0,8).map(c=>({label:c.label, value: STUDENTS.length ? Math.round(STUDENTS.reduce((a,s)=>a+(s[c.key]||s.overall),0)/STUDENTS.length) : 0})),300)}</div>
@@ -1374,12 +1476,16 @@ function studentProfileTabContent(s, tab){
     <div class="card"><h3 style="font-size:15px;margin-bottom:12px;">Academic Snapshot</h3>
       <div style="display:flex;flex-direction:column;gap:12px;">
         <div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span>Overall Employability</span><b>${s.overall}%</b></div><div class="pbar"><i style="width:${s.overall}%;"></i></div></div>
-        <div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span>Attendance</span><b>${s.attendance}%</b></div><div class="pbar teal"><i style="width:${s.attendance}%;"></i></div></div>
+        <div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span>Attendance</span><b>${s.attendance}%</b></div><div class="pbar teal"><i style="width:${s.attendance}%;"></i></div>
+          <div style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--text-soft);"><span>Total <b style="color:var(--ink);">${s.attendanceTotal}</b></span><span>Present <b style="color:var(--ready);">${s.attendancePresent}</b></span><span>Absent <b style="color:var(--risk);">${s.attendanceAbsent}</b></span></div></div>
         <div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span>Improvement (Baseline → Final)</span><b>+${s.improvement}</b></div><div class="pbar ready"><i style="width:${Math.min(100,s.improvement*3)}%;"></i></div></div>
       </div>
     </div>
   </div>`;
-  if(tab==='assessments') return `<div class="grid grid-4">${SKILL_CATEGORIES.map(c=>assessmentScoreCard(s,c)).join('')}</div>`;
+  if(tab==='assessments'){
+    setTimeout(()=>loadStudentAssessmentSummary(s.id), 0);
+    return `<div class="grid grid-4" id="profileAssessments">${[1,2,3,4].map(()=>`<div class="card"><div class="cell-sub">Loading assessment parameters…</div></div>`).join('')}</div>`;
+  }
   if(tab==='cohort') return `<div class="card"><h3 style="font-size:15px;margin-bottom:10px;">Cohort Placement</h3>
     <p style="font-size:13.5px;color:var(--text-soft);margin-bottom:14px;">${esc(s.name)} is currently in <b>${(COHORT_RULES.find(r=>r.key===s.status)||{label:'Near Ready'}).label}</b> — assigned automatically using platform rules. No manual reassignment in MVP.</p>
     ${COHORT_RULES.map(r=>`<div class="rule-card" style="margin-bottom:8px;${r.key===s.status?'border-color:var(--blue);':''}"><div class="rule-ic" style="background:${r.color}22;color:${r.color};">${ic(r.icon)}</div><div><b style="font-size:13px;">${r.label}</b><div class="cell-sub">${r.rule}</div></div>${r.key===s.status?`<span class="chip chip-ready" style="margin-left:auto;">Current</span>`:''}</div>`).join('')}
@@ -1387,12 +1493,18 @@ function studentProfileTabContent(s, tab){
   if(tab==='interventions') return `<div class="table-wrap"><table class="dt"><thead><tr><th>Intervention</th><th>Date</th><th>Trainer</th><th>Status</th></tr></thead><tbody>
     ${SESSIONS.length ? SESSIONS.slice(0,3).map(sc=>`<tr><td class="cell-name">${sc.intervention}</td><td>${sc.date}</td><td>${sc.trainer}</td><td>${statusChip(sc.status)}</td></tr>`).join('') : `<tr><td colspan="4"><div class="empty-state">${ic('puzzle','icon-lg')}<h3>No intervention sessions yet</h3><p>Sessions this student attends will appear here.</p></div></td></tr>`}
   </tbody></table></div>`;
-  if(tab==='reports') return `<div class="card"><h3 style="font-size:15px;margin-bottom:10px;">Generated Reports</h3><p class="cell-sub" style="margin-bottom:14px;">Reports for ${esc(s.name)} generated from assessment and intervention data.</p>
-    <div style="display:flex;flex-direction:column;gap:8px;">
-      ${['Baseline Assessment Report','Mid-Cohort Progress Report','Final Placement Readiness Report'].map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:12px;"><span style="font-size:13.5px;font-weight:600;">${r}</span><button class="btn btn-ghost btn-xs" data-action="export" data-what="student-report">${ic('download','icon-sm')}PDF</button></div>`).join('')}
-    </div>
-  </div>`;
-  if(tab==='attendance') return `<div class="card"><h3 style="font-size:15px;margin-bottom:10px;">Attendance Overview</h3>${donutSVG([{value:s.attendance,color:'var(--ready)'},{value:100-s.attendance,color:'var(--line)'}],160,22,s.attendance+'%','ATTENDED')}</div>`;
+  if(tab==='reports'){
+    setTimeout(()=>loadStudentOverallReport(s.id), 0);
+    return `<div class="card"><div class="card-head"><h3 style="font-size:15px;">Overall Report</h3>
+        <button class="btn btn-ghost btn-xs" data-action="export" data-what="overall-pdf">${ic('download','icon-sm')}PDF</button></div>
+      <div class="table-wrap"><table class="dt" id="profileOverallReportTable"><thead><tr><th>Assessment Name</th><th>Quiz Marks</th><th>Interview Marks</th><th>Average Marks</th><th>Final Overall Marks</th></tr></thead>
+      <tbody><tr><td colspan="5"><div class="empty-state">${ic('fileText','icon-lg')}<h3>Loading report…</h3></div></td></tr></tbody></table></div>
+    </div>`;
+  }
+  if(tab==='attendance'){
+    setTimeout(()=>loadStudentAttendance(s.id), 0);
+    return `<div id="profileAttendance"><div class="card"><div class="empty-state">${ic('calendar','icon-lg')}<h3>Loading attendance…</h3></div></div></div>`;
+  }
   if(tab==='timeline') return `<div class="card"><h3 style="font-size:15px;margin-bottom:12px;">Activity Timeline</h3><div class="timeline">
     ${(s.activityTimeline&&s.activityTimeline.length) ? s.activityTimeline.map(a=>`<div class="tl-item"><div class="tl-dot"></div><div class="tl-time">${a.time}</div><div style="font-size:13.5px;">${a.text}</div></div>`).join('') : `<p class="cell-sub">No activity recorded yet.</p>`}
   </div></div>`;
@@ -1572,11 +1684,12 @@ function assessmentScoreCard(s,c){
    PAGE: COHORT MANAGEMENT  (highest priority module)
 ============================================================ */
 function cohortSubnav(active){
-  const tabs=[['overview','Overview'],['ready','Placement Ready'],['commdef','Communication Deficit'],['intdef','Interview & Confidence Deficit'],['risk','High Risk'],['analytics','Analytics'],['mapping','Intervention Mapping'],['distribution','Student Distribution']];
+  const tabs=[['overview','Overview'],['A','Cohort A · Ready'],['B','Cohort B · Near Ready'],['C','Cohort C · High Risk'],['entry_level','Entry Level'],['analytics','Analytics'],['mapping','Intervention Mapping'],['distribution','Student Distribution']];
   return `<div class="subnav">${tabs.map(([k,l])=>`<button class="${active===k?'active':''}" data-action="set-tab" data-group="cohorts" data-value="${k}">${l}</button>`).join('')}</div>`;
 }
 function pageCohorts(){
   const tab = STATE.tab.cohorts;
+  loadStudents();
   const view = tab==='overview'?cohortOverview()
     : tab==='analytics'?cohortAnalytics()
     : tab==='mapping'?cohortInterventionMapping()
@@ -1650,11 +1763,13 @@ function cohortDetail(key){
   `;
 }
 function cohortAnalytics(){
+  const depts = [...new Set(STUDENTS.map(s=>s.dept))].sort();
+  const matrix = depts.map(d => COHORT_RULES.map(r => STUDENTS.filter(s=>s.dept===d && s.status===r.key).length));
   return `<div class="grid grid-12">
-    <div class="card span-6"><h3 style="font-size:15px;margin-bottom:10px;">Department-wise Cohort Distribution</h3>${heatmapSVG(
-      DEPARTMENTS.map(d=>d.name.split(' ')[0]), ['Ready','CommDef','IntDef','Risk'],
-      DEPARTMENTS.map(d=>[Math.round(d.placement*0.7), Math.round((100-d.placement)*0.3), Math.round((100-d.placement)*0.25), Math.round(d.highRisk/4)])
-    )}</div>
+    <div class="card span-6"><h3 style="font-size:15px;margin-bottom:10px;">Department-wise Cohort Distribution</h3>${
+      depts.length ? heatmapSVG(depts, COHORT_RULES.map(r=>r.label.split(' · ')[0]), matrix)
+      : `<div class="empty-state">${ic('target','icon-lg')}<h3>No students yet</h3></div>`
+    }</div>
     <div class="card span-6"><h3 style="font-size:15px;margin-bottom:10px;">Gender Distribution</h3>${donutSVG([{value:0,color:'var(--blue)'},{value:0,color:'var(--violet)'}],170,24,'','STUDENTS')}
       <div style="display:flex;justify-content:center;gap:16px;margin-top:10px;font-size:12px;"><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--blue);margin-right:5px;"></i>Male 0%</span><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--violet);margin-right:5px;"></i>Female 0%</span></div>
     </div>
@@ -1663,19 +1778,32 @@ function cohortAnalytics(){
   </div>`;
 }
 function cohortInterventionMapping(){
-  return `<div class="table-wrap"><table class="dt"><thead><tr><th>Cohort</th><th>Recommended Interventions</th><th>Students</th><th>Coverage</th></tr></thead><tbody>
-    <tr><td class="cell-name">Communication Deficit</td><td class="cell-sub">Communication Bootcamp, Soft Skills Lab</td><td>${cohortStudents('commdef').length}</td><td style="min-width:120px;"><div class="pbar"><i style="width:72%;"></i></div></td></tr>
-    <tr><td class="cell-name">Interview & Confidence Deficit</td><td class="cell-sub">Mock Interview Series, Behavioral Lab</td><td>${cohortStudents('intdef').length}</td><td style="min-width:120px;"><div class="pbar"><i style="width:65%;"></i></div></td></tr>
-    <tr><td class="cell-name">High Risk</td><td class="cell-sub">Aptitude Sprint, Coding Practice Lab, Resume Workshop</td><td>${cohortStudents('risk').length}</td><td style="min-width:120px;"><div class="pbar"><i style="width:58%;"></i></div></td></tr>
-    <tr><td class="cell-name">Placement Ready</td><td class="cell-sub">Advanced Mock Interviews, Recruiter Panels</td><td>${cohortStudents('ready').length}</td><td style="min-width:120px;"><div class="pbar"><i style="width:88%;"></i></div></td></tr>
+  const recs = {
+    A:'Advanced Mock Interviews, Recruiter Panels',
+    B:'Mock Interview Series, Aptitude Sprint',
+    C:'Aptitude Sprint, Coding Practice Lab, Resume Workshop',
+    entry_level:'Baseline Assessment, Orientation',
+  };
+  return `<div class="table-wrap"><table class="dt"><thead><tr><th>Cohort</th><th>Recommended Interventions</th><th>Students</th><th>Share</th></tr></thead><tbody>
+    ${COHORT_RULES.map(r=>{
+      const n = cohortStudents(r.key).length;
+      const share = pct(n, STUDENTS.length);
+      return `<tr><td class="cell-name">${r.label}</td><td class="cell-sub">${recs[r.key]}</td><td>${n}</td><td style="min-width:120px;"><div class="pbar"><i style="width:${share}%;background:${r.color};"></i></div></td></tr>`;
+    }).join('')}
   </tbody></table></div>`;
 }
 function cohortDistribution(){
+  // Live, computed straight from the currently-loaded STUDENTS array — no
+  // fabricated department formula. Recomputed every render, so it can
+  // never show a department/cohort breakdown that predates the latest
+  // Placement Rules recalculation.
+  const depts = [...new Set(STUDENTS.map(s=>s.dept))].sort();
+  const matrix = depts.map(d => COHORT_RULES.map(r => STUDENTS.filter(s=>s.dept===d && s.status===r.key).length));
   return `<div class="grid grid-12">
-    <div class="card span-12"><h3 style="font-size:15px;margin-bottom:10px;">Students per Department per Cohort</h3>${heatmapSVG(
-      DEPARTMENTS.map(d=>d.name.split(' ')[0]), COHORT_RULES.map(r=>r.label.split(' ')[0]),
-      DEPARTMENTS.map(d=>[Math.round(d.placement*0.6), Math.round((100-d.placement)*0.4), Math.round((100-d.placement)*0.3), Math.round(d.highRisk)])
-    )}</div>
+    <div class="card span-12"><h3 style="font-size:15px;margin-bottom:10px;">Students per Department per Cohort</h3>${
+      depts.length ? heatmapSVG(depts, COHORT_RULES.map(r=>r.label.split(' · ')[0]), matrix)
+      : `<div class="empty-state">${ic('target','icon-lg')}<h3>No students yet</h3><p>Cohort distribution will appear once students are registered for this college.</p></div>`
+    }</div>
   </div>`;
 }
 
@@ -1741,50 +1869,294 @@ function interventionEffectivenessView(){
    PAGE: REPORTS
 ============================================================ */
 const REPORT_TYPES = [
-  {key:'student', label:'Student Report', icon:'user', desc:'Individual student performance across all assessment cycles.'},
-  {key:'department', label:'Department Report', icon:'layers', desc:'Department-wise scores, placement readiness, and risk distribution.'},
-  {key:'assessment', label:'Assessment Report', icon:'book', desc:'Completion, participation, and question-wise breakdown per assessment.'},
-  {key:'intervention', label:'Intervention Report', icon:'puzzle', desc:'Attendance, effectiveness, and improvement per intervention.'},
-  {key:'placement', label:'Placement Report', icon:'shieldCheck', desc:'Placement readiness trend and cohort movement over time.'},
-  {key:'college', label:'College Report', icon:'building', desc:'Full college-level summary across every module for leadership review.'},
+  {key:'overall', label:'Overall Report', icon:'fileText', desc:'Every assessment attempt in your college — Assessment Name, Quiz Marks, Interview Marks, Average Marks and Final Overall Marks, computed live from the database.'},
 ];
 function pageReports(){
+  loadOverallReport();
   return `
-  <div class="section-head"><div><h2>Reports</h2><p>Generate polished reports for every module, ready to export or preview instantly.</p></div></div>
+  <div class="section-head"><div><h2>Overall Report</h2><p>Every assessment attempt across your college — Assessment Name, Quiz Marks, Interview Marks, Average Marks and Final Overall Marks, all fetched live from the database.</p></div>
+    <div class="head-actions">
+      <button class="btn btn-ghost btn-sm" data-action="reload-report">${ic('refresh','icon icon-sm')}Refresh</button>
+      <button class="btn btn-ghost btn-sm" data-action="export" data-what="overall-pdf">${ic('download','icon icon-sm')}PDF</button>
+      <button class="btn btn-ghost btn-sm" data-action="export" data-what="overall-excel">${ic('download','icon icon-sm')}Excel</button>
+      <button class="btn btn-ghost btn-sm" data-action="print-report" data-id="overall">${ic('fileText','icon icon-sm')}Print</button>
+    </div>
+  </div>
   <div class="card">
     <div class="toolbar">
       <div class="toolbar-left">
-        <select class="filter-select"><option>All Departments</option>${DEPARTMENTS.map(d=>`<option>${d.name}</option>`).join('')}</select>
-        <select class="filter-select"><option>All Assessments</option>${ASSESSMENTS.map(a=>`<option>${a.name}</option>`).join('')}</select>
-        <select class="filter-select"><option>All Cohorts</option>${COHORT_RULES.map(r=>`<option>${r.label}</option>`).join('')}</select>
-        <input type="date" class="filter-input" style="min-width:auto;">
+        <select class="filter-select" id="overallDeptFilter" data-action="report-filter"><option value="">All Departments</option></select>
+        <select class="filter-select" id="overallStudentFilter" data-action="report-filter"><option value="">All Students</option></select>
       </div>
     </div>
-  </div>
-  <div class="grid grid-3">
-    ${REPORT_TYPES.map(r=>`<div class="entity-card" data-action="generate-report" data-id="${r.key}">
-      <div class="kpi-ic" style="background:rgba(232,114,12,0.12);color:var(--blue);">${ic(r.icon)}</div>
-      <h3 style="font-size:15px;">${r.label}</h3><p class="cell-sub">${r.desc}</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation()" data-action="preview-report" data-id="${r.key}">${ic('eye','icon-sm')}Preview</button>
-        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation()" data-action="export" data-what="${r.key}-pdf">${ic('download','icon-sm')}PDF</button>
-        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation()" data-action="export" data-what="${r.key}-excel">${ic('download','icon-sm')}Excel</button>
-        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation()" data-action="print-report" data-id="${r.key}">${ic('fileText','icon-sm')}Print</button>
-      </div>
-    </div>`).join('')}
-  </div>
-  <div class="card"><h3 style="font-size:15px;margin-bottom:10px;">Recently Generated Reports</h3>
-    <div class="table-wrap"><table class="dt"><thead><tr><th>Report</th><th>Generated</th><th>By</th><th>Format</th><th></th></tr></thead><tbody>
-      ${PAST_REPORTS.length ? PAST_REPORTS.map(r=>`<tr><td class="cell-name">${r.name}</td><td class="cell-sub">${r.generatedAt}</td><td>${r.generatedBy}</td><td><span class="chip chip-neutral">${r.format}</span></td><td><button class="btn-icon" data-action="export" data-what="past-report">${ic('download','icon-sm')}</button></td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state">${ic('fileText','icon-lg')}<h3>No reports generated yet</h3><p>Reports you generate above will be listed here.</p></div></td></tr>`}
-    </tbody></table></div>
+    <div id="overallReportWrap"><div class="empty-state">${ic('fileText','icon-lg')}<h3>Loading overall report…</h3></div></div>
   </div>
   `;
+}
+
+/* ---------------- Overall Report (single live report) ---------------- */
+let OVERALL_REPORT = null;        // full, unfiltered rows from the backend
+let OVERALL_REPORT_LOADING = false;
+function overallReportRows(){
+  if(!OVERALL_REPORT || !OVERALL_REPORT.length) return [];
+  const dept = document.getElementById('overallDeptFilter')?.value || '';
+  const stu = document.getElementById('overallStudentFilter')?.value || '';
+  return OVERALL_REPORT.filter(r => (!dept || (r.department||'')===dept) && (!stu || r.studentId===stu));
+}
+function fmtScore(v, digits=2){
+  if(v === null || v === undefined || v === '') return '—';
+  const n = Number(v);
+  return isNaN(n) ? '—' : n.toFixed(digits);
+}
+async function loadOverallReport(force=false){
+  if(OVERALL_REPORT_LOADING) return;
+  if(!force && OVERALL_REPORT) { renderOverallReport(); return; }
+  OVERALL_REPORT_LOADING = true;
+  const wrap = document.getElementById('overallReportWrap');
+  if(wrap) wrap.innerHTML = `<div class="empty-state">${ic('fileText','icon-lg')}<h3>Loading overall report…</h3></div>`;
+  const { ok, data } = await collegeAdminApi('/reports/overall');
+  OVERALL_REPORT_LOADING = false;
+  OVERALL_REPORT = (ok && Array.isArray(data.report)) ? data.report : [];
+  populateOverallFilters();
+  renderOverallReport();
+}
+function populateOverallFilters(){
+  const deptSel = document.getElementById('overallDeptFilter');
+  const stuSel = document.getElementById('overallStudentFilter');
+  if(!deptSel || !stuSel) return;
+  const depts = [...new Set((OVERALL_REPORT||[]).map(r=>r.department).filter(Boolean))].sort();
+  deptSel.innerHTML = '<option value="">All Departments</option>' + depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  const students = [...new Map((OVERALL_REPORT||[]).filter(r=>r.studentId).map(r=>[r.studentId, r])).values()].sort((a,b)=>(a.studentName||'').localeCompare(b.studentName||''));
+  stuSel.innerHTML = '<option value="">All Students</option>' + students.map(r=>`<option value="${esc(r.studentId)}">${esc(r.studentName||'Unknown')}</option>`).join('');
+}
+function renderOverallReport(){
+  const wrap = document.getElementById('overallReportWrap');
+  if(!wrap) return;
+  const rows = overallReportRows();
+  if(!rows.length){
+    wrap.innerHTML = `<div class="empty-state">${ic('fileText','icon-lg')}<h3>No assessment attempts yet</h3><p>Submitted quiz results for your college will appear here once students complete assessments.</p></div>`;
+    return;
+  }
+  wrap.innerHTML = `<div class="table-wrap"><table class="dt"><thead><tr><th>Student</th><th>Reg No</th><th>Department</th><th>Assessment Name</th><th>Quiz Marks</th><th>Interview Marks</th><th>Average Marks</th><th>Final Overall Marks</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td class="cell-name">${esc(r.studentName||'—')}</td>
+      <td class="cell-sub">${esc(r.rollNumber||'—')}</td>
+      <td class="cell-sub">${esc(r.department||'—')}</td>
+      <td>${esc(r.assessmentName||'—')}</td>
+      <td><b>${fmtScore(r.quizMarks)}%</b></td>
+      <td><b>${fmtScore(r.interviewMarks)}%</b></td>
+      <td><b>${fmtScore(r.averageMarks)}%</b></td>
+      <td><span class="chip chip-ready">${fmtScore(r.finalOverallMarks)}%</span></td>
+    </tr>`).join('')}</tbody></table></div>
+    <p class="cell-sub" style="margin-top:12px;">${rows.length} assessment attempt${rows.length===1?'':'s'} · refreshed live from the database.</p>`;
+}
+async function loadStudentOverallReport(studentId){
+  const tbody = document.querySelector('#profileOverallReportTable tbody');
+  if(!tbody) return;
+  const { ok, data } = await collegeAdminApi(`/reports/overall?studentId=${encodeURIComponent(studentId)}`);
+  const rows = (ok && Array.isArray(data.report)) ? data.report : [];
+  if(!rows.length){
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">${ic('fileText','icon-lg')}<h3>No assessment attempts yet</h3><p>Submitted quiz results for this student will appear here once assessments are completed.</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r=>`<tr>
+    <td>${esc(r.assessmentName||'—')}</td>
+    <td><b>${fmtScore(r.quizMarks)}%</b></td>
+    <td><b>${fmtScore(r.interviewMarks)}%</b></td>
+    <td><b>${fmtScore(r.averageMarks)}%</b></td>
+    <td><span class="chip chip-ready">${fmtScore(r.finalOverallMarks)}%</span></td>
+  </tr>`).join('');
+}
+
+/* ============================================================
+   PAGE: ATTENDANCE (college-wide) — live from db.attendance,
+   scoped to this admin's college. Marked exclusively by the Super
+   Admin; this page only reads. Every field re-fetches on load, so
+   attendance the Super Admin just marked shows up the moment the
+   admin opens or refreshes this page — no separate sync step.
+============================================================ */
+let ATTENDANCE_STATE = { department:'', date:'' };
+function pageAttendance(){
+  loadAttendanceOverview();
+  loadAttendanceDepartments();
+  loadAttendanceDates();
+  return `
+  <div class="section-head"><div><h2>Attendance</h2><p>Live class-wise attendance for your college, marked by the Super Admin.</p></div>
+    <div class="head-actions">
+      <button class="btn btn-ghost btn-sm" data-action="reload-attendance">${ic('refresh','icon icon-sm')}Refresh</button>
+    </div>
+  </div>
+  <div class="grid grid-4" id="attendanceOverviewCards">
+    <div class="kpi-card"><div class="kpi-label">Total Classes Marked</div><div class="kpi-value">—</div></div>
+    <div class="kpi-card"><div class="kpi-label">Present</div><div class="kpi-value">—</div></div>
+    <div class="kpi-card"><div class="kpi-label">Absent</div><div class="kpi-value">—</div></div>
+    <div class="kpi-card"><div class="kpi-label">Overall Attendance</div><div class="kpi-value">—</div></div>
+  </div>
+  <div class="card" style="margin-top:16px;">
+    <div class="card-head"><h3 style="font-size:15px;">This Month</h3></div>
+    <div id="attendanceThisMonth"><p class="cell-sub">Loading…</p></div>
+  </div>
+  <div class="card" style="margin-top:16px;">
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <select class="filter-select" id="attDeptFilter" data-action="attendance-filter"><option value="">All Departments</option></select>
+        <select class="filter-select" id="attDateFilter" data-action="attendance-filter"><option value="">Select a class date…</option></select>
+      </div>
+    </div>
+    <div id="attendanceRecordsWrap"><div class="empty-state">${ic('calendar','icon-lg')}<h3>Pick a class date</h3><p>Choose a date above to see who was present or absent that day.</p></div></div>
+  </div>
+  `;
+}
+async function loadAttendanceOverview(){
+  const el = document.getElementById('attendanceOverviewCards');
+  const tmEl = document.getElementById('attendanceThisMonth');
+  const params = ATTENDANCE_STATE.department ? `?department=${encodeURIComponent(ATTENDANCE_STATE.department)}` : '';
+  const { ok, data } = await collegeAdminApi(`/attendance/overview${params}`);
+  const o = (ok && data.overview) ? data.overview : {};
+  if(el){
+    const total = o.total ?? 0, present = o.present ?? 0, absent = o.absent ?? 0;
+    const pct = total ? Math.round((present/total)*100) : 0;
+    el.innerHTML = `
+      <div class="kpi-card"><div class="kpi-label">Total Classes Marked</div><div class="kpi-value">${total}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Present</div><div class="kpi-value" style="color:var(--ready);">${present}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Absent</div><div class="kpi-value" style="color:var(--risk);">${absent}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Overall Attendance</div><div class="kpi-value">${total?pct+'%':'—'}</div></div>`;
+  }
+  if(tmEl){
+    const tm = o.thisMonth || {};
+    tmEl.innerHTML = tm.total
+      ? `<div style="display:flex;gap:26px;flex-wrap:wrap;">
+          <div><div class="cell-sub">Classes This Month</div><b style="font-size:18px;">${tm.total}</b></div>
+          <div><div class="cell-sub">Present</div><b style="font-size:18px;color:var(--ready);">${tm.present}</b></div>
+          <div><div class="cell-sub">Absent</div><b style="font-size:18px;color:var(--risk);">${tm.absent}</b></div>
+          <div><div class="cell-sub">Attendance %</div><b style="font-size:18px;">${Math.round(tm.percentage||0)}%</b></div>
+        </div>`
+      : `<p class="cell-sub">No classes marked yet this month.</p>`;
+  }
+}
+async function loadAttendanceDepartments(){
+  const sel = document.getElementById('attDeptFilter');
+  if(!sel) return;
+  const { ok, data } = await collegeAdminApi('/attendance/departments');
+  const depts = (ok && Array.isArray(data.departments)) ? data.departments : [];
+  const current = ATTENDANCE_STATE.department;
+  sel.innerHTML = '<option value="">All Departments</option>' + depts.map(d=>`<option value="${esc(d)}" ${d===current?'selected':''}>${esc(d)}</option>`).join('');
+}
+async function loadAttendanceDates(){
+  const sel = document.getElementById('attDateFilter');
+  if(!sel) return;
+  const params = ATTENDANCE_STATE.department ? `?department=${encodeURIComponent(ATTENDANCE_STATE.department)}` : '';
+  const { ok, data } = await collegeAdminApi(`/attendance/dates${params}`);
+  const dates = (ok && Array.isArray(data.dates)) ? data.dates : [];
+  if(!ATTENDANCE_STATE.date && dates.length) ATTENDANCE_STATE.date = dates[0].date;
+  const current = ATTENDANCE_STATE.date;
+  sel.innerHTML = '<option value="">Select a class date…</option>' + dates.map(d=>`<option value="${esc(d.date)}" ${d.date===current?'selected':''}>${fmtDate(d.date)||d.date} — ${d.present} present · ${d.absent} absent</option>`).join('');
+  if(current) loadAttendanceRecords();
+  else { const wrap = document.getElementById('attendanceRecordsWrap'); if(wrap) wrap.innerHTML = `<div class="empty-state">${ic('calendar','icon-lg')}<h3>No classes marked yet</h3><p>Attendance marked by the Super Admin will appear here.</p></div>`; }
+}
+async function loadAttendanceRecords(){
+  const wrap = document.getElementById('attendanceRecordsWrap');
+  if(!wrap) return;
+  if(!ATTENDANCE_STATE.date){ wrap.innerHTML = `<div class="empty-state">${ic('calendar','icon-lg')}<h3>Pick a class date</h3><p>Choose a date above to see who was present or absent that day.</p></div>`; return; }
+  wrap.innerHTML = `<div class="empty-state">${ic('calendar','icon-lg')}<h3>Loading records…</h3></div>`;
+  const params = new URLSearchParams({ date: ATTENDANCE_STATE.date });
+  if(ATTENDANCE_STATE.department) params.set('department', ATTENDANCE_STATE.department);
+  const { ok, data } = await collegeAdminApi(`/attendance/records?${params.toString()}`);
+  const rows = (ok && Array.isArray(data.records)) ? data.records : [];
+  if(!rows.length){
+    wrap.innerHTML = `<div class="empty-state">${ic('users','icon-lg')}<h3>No students found</h3><p>Try a different department filter.</p></div>`;
+    return;
+  }
+  const statusChipFor = st => st==='present' ? statusChip('present') : st==='absent' ? statusChip('absent') : `<span class="chip">Not Marked</span>`;
+  wrap.innerHTML = `<div class="table-wrap"><table class="dt"><thead><tr><th>Student</th><th>Reg No</th><th>Department</th><th>Cohort</th><th>Status</th><th>Marked By</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td class="cell-name">${esc(r.studentName||'—')}</td>
+      <td class="cell-sub">${esc(r.rollNumber||'—')}</td>
+      <td class="cell-sub">${esc(r.department||'—')}</td>
+      <td class="cell-sub">${esc(r.cohort||'—')}</td>
+      <td>${statusChipFor(r.status)}</td>
+      <td class="cell-sub">${esc(r.markedBy||'—')}</td>
+    </tr>`).join('')}</tbody></table></div>
+    <p class="cell-sub" style="margin-top:12px;">${data.present||0} present · ${data.absent||0} absent · ${data.notMarked||0} not marked · refreshed live from the database.</p>`;
+}
+function onAttendanceFilterChange(el){
+  if(el.id==='attDeptFilter'){ ATTENDANCE_STATE.department = el.value; ATTENDANCE_STATE.date = ''; loadAttendanceOverview(); loadAttendanceDates(); }
+  else if(el.id==='attDateFilter'){ ATTENDANCE_STATE.date = el.value; loadAttendanceRecords(); }
+}
+
+/* ---------------- Student profile: attendance (live from backend) ---------------- */
+async function loadStudentAttendance(studentId){
+  const root = document.getElementById('profileAttendance');
+  if(!root) return;
+  const { ok, data } = await collegeAdminApi(`/students/${encodeURIComponent(studentId)}/attendance`);
+  const att = (ok && data.attendance) ? data.attendance : {};
+  const total = att.total ?? 0, present = att.present ?? 0, absent = att.absent ?? 0;
+  const pct = total ? Math.round((present/total)*100) : 0;
+  const tm = att.thisMonth || {};
+  const history = att.history || [];
+  const rows = history.slice(0, 12);
+  root.innerHTML = `
+    <div class="card"><h3 style="font-size:15px;margin-bottom:12px;">Attendance Overview</h3>
+      <div style="display:flex;gap:26px;align-items:center;flex-wrap:wrap;">
+        ${donutSVG([{value:total?present:0,color:'var(--ready)'},{value:total?absent:0,color:'var(--risk)'}],160,22,total?pct+'%':'0','ATTENDED')}
+        <div style="display:flex;flex-direction:column;gap:12px;flex:1;min-width:220px;">
+          <div style="display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding-bottom:8px;font-size:13.5px;"><span class="cell-sub">Total Classes</span><b>${total}</b></div>
+          <div style="display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding-bottom:8px;font-size:13.5px;"><span class="cell-sub">Present</span><b style="color:var(--ready);">${present}</b></div>
+          <div style="display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding-bottom:8px;font-size:13.5px;"><span class="cell-sub">Absent</span><b style="color:var(--risk);">${absent}</b></div>
+          <div style="display:flex;justify-content:space-between;font-size:13.5px;"><span class="cell-sub">This Month (${tm.month||'—'})</span><b>${tm.total??0} · ${(tm.total||0)?Math.round(tm.percentage||0)+'%':'—'}</b></div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px;"><h3 style="font-size:15px;margin-bottom:12px;">Attendance History</h3>
+      ${rows.length ? `<div class="table-wrap"><table class="dt"><thead><tr><th>Date</th><th>Status</th><th>Marked By</th></tr></thead><tbody>
+        ${rows.map(h=>`<tr><td>${fmtDateTime(h.date)||h.date||'—'}</td><td>${h.status==='present'?statusChip('present'):statusChip('absent')}</td><td class="cell-sub">${esc(h.markedBy||'—')}</td></tr>`).join('')}
+      </tbody></table></div>` : `<div class="empty-state">${ic('calendar','icon-lg')}<h3>No attendance records yet</h3><p>Classes marked by the Super Admin will appear here.</p></div>`}
+    </div>`;
+}
+
+/* ---------------- Student profile: assessment parameters (six live values) ---------------- */
+const STUDENT_ASSESSMENT_CACHE = {};
+async function loadStudentAssessmentSummary(studentId, force=false){
+  if(!force && STUDENT_ASSESSMENT_CACHE[studentId]){
+    renderStudentAssessmentSummary(STUDENT_ASSESSMENT_CACHE[studentId]);
+    return;
+  }
+  const { ok, data } = await collegeAdminApi(`/students/${encodeURIComponent(studentId)}/assessment-summary`);
+  const res = (ok && data) ? data : { error:true };
+  if(!res.error) STUDENT_ASSESSMENT_CACHE[studentId] = res;
+  renderStudentAssessmentSummary(res);
+}
+function assessmentParamCard(label, score, attempts, tone='teal'){
+  const colorMap = { teal:'var(--ready)', amber:'var(--warn)', rose:'var(--risk)' };
+  const hasScore = typeof score === 'number';
+  const pctVal = hasScore ? Math.max(0, Math.min(100, score)) : 0;
+  const labelText = !hasScore ? 'No data' : (score>=80?'Excellent':score>=65?'Good':score>=50?'Average':'Weak');
+  const color = hasScore ? (score>=80?colorMap.teal:score>=50?colorMap.amber:colorMap.rose) : colorMap.teal;
+  return `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;"><b style="font-size:13px;">${esc(label)}</b><span class="chip" style="background:${color}22;color:${color};">${hasScore?labelText:'—'}</span></div>
+    <div style="font-family:var(--font-display);font-size:24px;font-weight:700;margin:10px 0 4px;">${hasScore?Math.round(score):'—'}<span style="font-size:13px;color:var(--text-faint);font-weight:600;">/100</span></div>
+    <div class="pbar" style="margin-bottom:8px;"><i style="width:${pctVal}%;background:${color};"></i></div>
+    <div class="cell-sub">${hasScore?`${attempts} attempt${attempts===1?'':'s'}`:'Not assessed yet'}</div>
+  </div>`;
+}
+function renderStudentAssessmentSummary(res){
+  const el = document.getElementById('profileAssessments');
+  if(!el) return;
+  if(res.error){
+    el.innerHTML = `<div class="card" style="grid-column:1/-1;"><div class="empty-state">${ic('fileText','icon-lg')}<h3>Could not load assessment summary</h3><p>Please try again.</p></div></div>`;
+    return;
+  }
+  const cards = (res.sections||[]).map(sec=>assessmentParamCard(sec.name, sec.score, sec.attempts));
+  const manual = res.manualInterview || {};
+  cards.push(assessmentParamCard('Manual Interview', manual.score, manual.attempts));
+  el.innerHTML = cards.length ? cards.join('') : `<div class="card" style="grid-column:1/-1;"><div class="empty-state">${ic('fileText','icon-lg')}<h3>No assessment data yet</h3><p>Submitted quiz results will appear here.</p></div></div>`;
 }
 
 /* ============================================================
    PAGE: ANALYTICS
 ============================================================ */
 function pageAnalytics(){
+  loadStudents();
   const avg = k => STUDENTS.length ? Math.round(STUDENTS.reduce((a,s)=>a+(s[k]||s.overall),0)/STUDENTS.length) : 0;
   return `
   <div class="section-head"><div><h2>Analytics</h2><p>Deep, interactive analytics across every assessment category and department.</p></div></div>
@@ -2013,6 +2385,13 @@ function buildReportData(key){
     case 'intervention': return { title:'Intervention Report', columns:['Intervention','Category','Effectiveness %','Sessions','Avg Improvement'], rows: INTERVENTIONS.map(i=>[i.name,i.category,i.effectiveness,i.sessions,i.avgImprovement]), sheetRows: INTERVENTIONS.map(i=>({Intervention:i.name, Category:i.category, 'Effectiveness %':i.effectiveness, Sessions:i.sessions, 'Avg Improvement':i.avgImprovement})) };
     case 'placement': return { title:'Placement Readiness Report', columns:['Cohort','Rule','Students'], rows: COHORT_RULES.map(r=>[r.label,r.rule,cohortStudents(r.key).length]), sheetRows: COHORT_RULES.map(r=>({Cohort:r.label, Rule:r.rule, Students:cohortStudents(r.key).length})) };
     case 'college': { const ds = dashboardStats(); const readyPct = Math.round(ds.ready/ds.total*100); return { title:'College Report', columns:['Metric','Value'], rows:[['Total Students',ds.total],['Average Score',ds.avgScore+'%'],['Placement Ready %',readyPct+'%'],['High Risk Students',ds.risk]], sheetRows:[{Metric:'Total Students',Value:ds.total},{Metric:'Average Score',Value:ds.avgScore+'%'},{Metric:'Placement Ready %',Value:readyPct+'%'},{Metric:'High Risk Students',Value:ds.risk}] }; }
+    case 'overall': {
+      const rows = overallReportRows().map(r=>[
+        r.studentName||'—', r.rollNumber||'—', r.department||'—', r.assessmentName||'—',
+        fmtScore(r.quizMarks)+'%', fmtScore(r.interviewMarks)+'%', fmtScore(r.averageMarks)+'%', fmtScore(r.finalOverallMarks)+'%',
+      ]);
+      return { title:'Overall Report', columns:['Student','Reg No','Department','Assessment Name','Quiz Marks','Interview Marks','Average Marks','Final Overall Marks'], rows, sheetRows: overallReportRows().map(r=>({'Student':r.studentName||'—','Reg No':r.rollNumber||'—','Department':r.department||'—','Assessment Name':r.assessmentName||'—','Quiz Marks %':fmtScore(r.quizMarks),'Interview Marks %':fmtScore(r.interviewMarks),'Average Marks %':fmtScore(r.averageMarks),'Final Overall Marks %':fmtScore(r.finalOverallMarks)})) };
+    }
     default: return { title:'Report', columns:['Item'], rows:[['No data']], sheetRows:[{Item:'No data'}] };
   }
 }
@@ -2025,6 +2404,19 @@ function handleExport(what){
   if(what==='results-pdf'){ downloadPDFTable(`assessment-results-${stamp}.pdf`, 'Assessment Results', ['Student','Department','Section','Score','Status'], STUDENTS.map(s=>[s.name,s.dept,s.section,s.overall+'%',s.status])); return; }
   if(what==='audit-logs'){ downloadExcel(`audit-logs-${stamp}.xlsx`, AUDIT_LOGS.map(a=>({Timestamp:a.time, User:a.user, Role:a.role, Action:a.action, 'IP Address':a.ip})), 'Audit Logs'); return; }
   if(what==='past-report'){ downloadPDFTable(`report-${stamp}.pdf`, 'Report', ['Item'], [['Archived report — regenerate from Reports tab for latest data']]); return; }
+  if(what==='student-report'){
+    const sid = STATE.params && STATE.params.id;
+    if(!sid){ showToast('Select a student first','error'); return; }
+    showToast('Generating student report…','info');
+    collegeAdminApi(`/reports/overall?studentId=${encodeURIComponent(sid)}`).then(({ok,data})=>{
+      const rows = (ok && Array.isArray(data.report)) ? data.report : [];
+      if(!rows.length){ showToast('No assessment attempts yet for this student','error'); return; }
+      const cols = ['Assessment Name','Quiz Marks %','Interview Marks %','Average Marks %','Final Overall Marks %'];
+      const body = rows.map(r=>[r.assessmentName||'—', fmtScore(r.quizMarks), fmtScore(r.interviewMarks), fmtScore(r.averageMarks), fmtScore(r.finalOverallMarks)]);
+      downloadPDFTable(`student-overall-report-${stamp}.pdf`, 'Overall Report', cols, body);
+    });
+    return;
+  }
   const m = what.match(/^(.*)-(pdf|excel)$/);
   if(m){
     const [,key,fmt] = m;
@@ -2130,13 +2522,6 @@ document.addEventListener('click', (e)=>{
       break;
     }
     case 'students-page': STATE.page_num.students = Number(el.dataset.value); renderPage(); break;
-    case 'filter-students': {
-      const field = el.dataset.field;
-      STATE.filters.students[field] = el.value !== undefined ? el.value : el.dataset.value;
-      STATE.page_num.students = 1;
-      renderPage();
-      break;
-    }
     case 'student-profile-tab': goPage('student-profile', {id, tab: el.dataset.value}); break;
 
     case 'view-session': openSessionModal(id); break;
@@ -2200,6 +2585,10 @@ document.addEventListener('click', (e)=>{
       break;
     }
     case 'print-report': { const data = buildReportData(id); printTable(data.title, data.columns, data.rows); break; }
+    case 'reload-report': loadOverallReport(true); break;
+    case 'report-filter': renderOverallReport(); break;
+    case 'reload-attendance': loadAttendanceOverview(); loadAttendanceDates(); break;
+    case 'attendance-filter': onAttendanceFilterChange(el); break;
     case 'choose-file': triggerFilePicker(); break;
     case 'confirm-bulk-import': {
       const rows = PENDING_UPLOAD_ROWS;
@@ -2243,6 +2632,10 @@ document.addEventListener('change', (e)=>{
   const el = e.target.closest('[data-action="filter-students"]');
   if(el){ STATE.filters.students[el.dataset.field] = el.value; STATE.page_num.students = 1; renderPage(); }
   if(e.target.id==='bulkFileInput' && e.target.files && e.target.files[0]){ handleBulkFile(e.target.files[0]); }
+  const reportFilterEl = e.target.closest('[data-action="report-filter"]');
+  if(reportFilterEl){ renderOverallReport(); }
+  const attFilterEl = e.target.closest('[data-action="attendance-filter"]');
+  if(attFilterEl){ onAttendanceFilterChange(attFilterEl); }
 });
 document.addEventListener('dragover', (e)=>{ if(e.target.closest('#bulkDropZone')) e.preventDefault(); });
 document.addEventListener('drop', (e)=>{

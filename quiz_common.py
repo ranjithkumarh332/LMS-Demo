@@ -35,6 +35,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from flask import jsonify
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
+from pymongo import UpdateOne
 
 # ------------------------------------------------------------
 # Cohort configuration
@@ -58,14 +59,24 @@ ENTRY_LEVEL = "entry_level"
 # This is a one-time DB seed, not a code-level threshold: once seeded,
 # every subsequent read/write goes through db.placement_rules and this
 # constant is never consulted again.
+#
+# Three-threshold model (Super Admin > Placement Rules):
+#   placementReadyThreshold — Marks >= this  -> Cohort A (Placement Ready)
+#   nearReadyThreshold      — Marks >= this  -> Cohort B (Near Ready)
+#   highRiskThreshold       — Marks <  this  -> Cohort C (High Risk)
+# highRiskThreshold is kept equal to nearReadyThreshold (it's the same
+# boundary described from the other side — "Near Ready starts here" /
+# "High Risk ends here") but is stored and edited as its own field so
+# the Super Admin UI can show/edit it directly, per spec.
+# assessmentWeight / interviewWeight are plain percentages (0-100) that
+# must sum to exactly 100; compute_final_employability_score() divides
+# by 100 itself.
 _DEFAULT_PLACEMENT_RULES_SEED = {
-    "cohortRanges": [
-        {"cohort": "A", "min": 75, "max": 100},
-        {"cohort": "B", "min": 50, "max": 74.999},
-        {"cohort": "C", "min": 0, "max": 49.999},
-    ],
-    "assessmentWeight": 0.6,
-    "interviewWeight": 0.4,
+    "placementReadyThreshold": 75,
+    "nearReadyThreshold": 50,
+    "highRiskThreshold": 50,
+    "assessmentWeight": 60,
+    "interviewWeight": 40,
 }
 
 SECTION_ALIASES = {
@@ -76,6 +87,21 @@ SECTION_ALIASES = {
 
 def now():
     return datetime.now(timezone.utc)
+
+
+def iso_utc(dt):
+    """Same fix as serialize()'s datetime branch, exposed standalone for
+    the handful of call sites that build their response dict by hand
+    instead of going through serialize() — student.py's quiz-attempt
+    timestamps (startedAt/submittedAt), cohort timestamps, and the other
+    role modules' equivalents. Mongo always hands back naive datetimes
+    even though every write path here stores UTC; treating a naive value
+    as UTC before formatting (instead of leaving it ambiguous, which
+    browsers then parse as local time) is what actually fixes displayed
+    times being off by the viewer's UTC offset."""
+    if not dt:
+        return None
+    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).isoformat()
 
 
 def error(message, status=400):
@@ -114,7 +140,22 @@ def to_object_id(id_str):
 
 
 def serialize(doc, extra_id_fields=None):
-    """Turn a Mongo doc into JSON-safe dict: _id -> id, datetimes -> isoformat."""
+    """Turn a Mongo doc into JSON-safe dict: _id -> id, datetimes -> isoformat.
+
+    Timezone fix (Student Dashboard assessment timing bug): pymongo always
+    round-trips datetimes as NAIVE (Mongo has no tz concept), even though
+    every write path in this codebase inserts timezone-AWARE UTC values
+    (see parse_dt() in quiz_module.py). A naive datetime's .isoformat()
+    has no 'Z'/offset suffix — e.g. "2026-08-01T09:30:00" — and browsers
+    parse a timezone-less ISO datetime-time string as LOCAL time, not
+    UTC. That silently re-interpreted every stored UTC wall-clock time as
+    if it were already in the viewer's timezone, which is exactly why the
+    Start/End *time* (but usually not the date, unless the shift crossed
+    midnight) came out wrong everywhere a quiz's startDateTime/endDateTime
+    got serialized this way. Re-attaching UTC before formatting makes the
+    output an unambiguous, correctly-offset ISO string for every caller —
+    Student, Trainer and Super Admin dashboards alike, since they all
+    funnel through this one function."""
     if doc is None:
         return None
     out = {}
@@ -122,7 +163,7 @@ def serialize(doc, extra_id_fields=None):
         if k == "_id":
             out["id"] = str(v)
         elif isinstance(v, datetime):
-            out[k] = v.isoformat()
+            out[k] = (v if v.tzinfo else v.replace(tzinfo=timezone.utc)).isoformat()
         elif isinstance(v, ObjectId):
             out[k] = str(v)
         else:
@@ -139,6 +180,102 @@ def student_cohort_label(user_doc):
     """Returns 'A' / 'B' / 'C' / 'entry_level' for a student user doc."""
     cohort = (user_doc or {}).get("cohort")
     return cohort if cohort in VALID_COHORTS else ENTRY_LEVEL
+
+
+# ------------------------------------------------------------
+# Attendance — SINGLE SOURCE OF TRUTH for per-student attendance.
+# The Super Admin Mark/View screens write db.attendance (one doc per
+# student per class date, status present/absent, markedBy = the admin).
+# The percentage is NEVER stored anywhere: every consumer (Student
+# Dashboard, College Admin student list/profile, Super Admin records)
+# derives it live from this helper so all three can never drift apart.
+# ------------------------------------------------------------
+def attendance_summary(db, student_id, include_history=True):
+    """Attendance for ONE student, computed live from db.attendance.
+
+    Returns:
+        { total, present, absent, percentage, lastUpdated, history,
+          thisMonth, monthly }
+    total = present + absent for THIS student only (a student with no
+    records gets honest all-zero stats rather than inheriting someone
+    else's numbers). history is newest-first and only built when
+    include_history is True (college list view just needs the counts).
+    thisMonth holds the current calendar month's present/absent/total
+    and monthly holds a chronological month-wise present/absent
+    breakdown (both derived live from each record's stored date, so the
+    Monthly Attendance Graph and This-Month stats can never drift from
+    the same attendance records the totals come from)."""
+    student_oid = student_id if isinstance(student_id, ObjectId) else to_object_id(student_id)
+    if not student_oid:
+        return {"total": 0, "present": 0, "absent": 0, "percentage": 0,
+                "lastUpdated": None, "history": [], "thisMonth": {}, "monthly": []}
+    records = list(db.attendance.find({"studentId": student_oid}))
+    present = sum(1 for r in records if r.get("status") == "present")
+    absent = sum(1 for r in records if r.get("status") == "absent")
+    total = present + absent
+    percentage = round(present / total * 100, 2) if total else 0
+    last_ts = None
+    for r in records:
+        ts = r.get("updatedAt") or r.get("markedAt")
+        if ts and (last_ts is None or ts > last_ts):
+            last_ts = ts
+    history = []
+    if include_history:
+        history = [{
+            "date": r.get("date"),
+            "status": r.get("status"),
+            "markedAt": iso_utc(r.get("markedAt")),
+            "markedBy": (r.get("markedBy") or {}).get("name"),
+        } for r in records]
+        history.sort(key=lambda h: (h.get("date") or ""), reverse=True)
+
+    # Month-wise breakdown — one bucket per YYYY-MM of a record's date
+    # (stored as YYYY-MM-DD). Kept for every month that actually has
+    # records, oldest first, so the graph is always purely DB-driven.
+    this_month_key = now().strftime("%Y-%m")
+    monthly = {}
+    this_present = this_absent = 0
+    for r in records:
+        d = str(r.get("date") or "")
+        mk = d[:7] if len(d) >= 7 else ""
+        if not mk:
+            continue
+        bucket = monthly.setdefault(mk, {"present": 0, "absent": 0, "total": 0})
+        if r.get("status") == "present":
+            bucket["present"] += 1
+        elif r.get("status") == "absent":
+            bucket["absent"] += 1
+        bucket["total"] = bucket["present"] + bucket["absent"]
+        if mk == this_month_key:
+            if r.get("status") == "present":
+                this_present += 1
+            elif r.get("status") == "absent":
+                this_absent += 1
+
+    monthly_list = [{
+        "month": mk,
+        "present": b["present"],
+        "absent": b["absent"],
+        "total": b["total"],
+    } for mk, b in sorted(monthly.items())]
+    this_total = this_present + this_absent
+    this_month = {
+        "month": this_month_key,
+        "present": this_present,
+        "absent": this_absent,
+        "total": this_total,
+        "percentage": round(this_present / this_total * 100, 2) if this_total else 0,
+    }
+    return {
+        "total": total,
+        "present": present,
+        "absent": absent,
+        "percentage": percentage,
+        "lastUpdated": iso_utc(last_ts),
+        "history": history,
+        "thisMonth": this_month,
+        "monthly": monthly_list,
+    }
 
 
 # ------------------------------------------------------------
@@ -164,25 +301,33 @@ def get_placement_rules(db):
 
 
 def cohort_from_score(db, final_score):
-    """Final Employability Score -> cohort, using whatever ranges are
-    CURRENTLY configured in db.placement_rules (fetched fresh, every call)."""
+    """Final Employability Score -> cohort, using whatever thresholds are
+    CURRENTLY configured in db.placement_rules (fetched fresh, every call).
+
+    Score >= placementReadyThreshold          -> Cohort A (Placement Ready)
+    Score >= nearReadyThreshold (and < above) -> Cohort B (Near Ready)
+    Score <  nearReadyThreshold                -> Cohort C (High Risk)
+
+    There are no hardcoded ranges: both boundaries come straight from the
+    Super Admin's saved Placement Rules, every single call."""
     rules = get_placement_rules(db)
-    for band in sorted(rules.get("cohortRanges", []), key=lambda b: -b["min"]):
-        if band["min"] <= final_score <= band.get("max", 100):
-            return band["cohort"]
-    # Score fell outside every configured band (e.g. gap in ranges) —
-    # fall back to the lowest-bound cohort rather than silently failing.
-    bands = rules.get("cohortRanges", [])
-    return min(bands, key=lambda b: b["min"])["cohort"] if bands else "C"
+    placement_ready = rules.get("placementReadyThreshold", 75)
+    near_ready = rules.get("nearReadyThreshold", 50)
+    if final_score >= placement_ready:
+        return "A"
+    if final_score >= near_ready:
+        return "B"
+    return "C"
 
 
 def compute_final_employability_score(db, assessment_percentage, interview_percentage):
     """Weighted combination of assessment score + interview score, using
-    the weights currently configured in db.placement_rules."""
+    the weights (percentages, 0-100, summing to 100) currently configured
+    in db.placement_rules."""
     rules = get_placement_rules(db)
-    a_weight = rules.get("assessmentWeight", 0.5)
-    i_weight = rules.get("interviewWeight", 0.5)
-    total_weight = a_weight + i_weight or 1
+    a_weight = rules.get("assessmentWeight", 50)
+    i_weight = rules.get("interviewWeight", 50)
+    total_weight = (a_weight + i_weight) or 100
     final_score = (
         (assessment_percentage * a_weight) + (interview_percentage * i_weight)
     ) / total_weight
@@ -355,6 +500,142 @@ def recompute_cohort_from_quiz_results(db, student_id):
     return cohort
 
 
+def compute_cohort_recalculation_ops(db, rules):
+    """
+    Batch equivalent of check_and_generate_cohort() + recompute_cohort_from_quiz_results()
+    run across EVERY student, built for the "Save Rules recalculates all
+    existing students" workflow (Placement Rules spec). Deliberately does
+    NOT loop find_one()/update_one() per student — at 5000+ students that
+    is 10,000+ round trips. Instead:
+
+      - one find() to pull every "engine 1" (baseline assessment +
+        interview) candidate's scores,
+      - one aggregation to pull every "engine 2" (validated Create-Quiz
+        results) candidate's average score,
+      - one more find() (with $in) to check precedence/ownership for
+        engine-2 candidates,
+      - cohort math done in Python against the *already-fetched* rules
+        (no per-student re-read of db.placement_rules),
+
+    then returns ready-to-run pymongo.UpdateOne lists for db.users and
+    db.student_cohort so the caller can execute them with bulk_write
+    (ideally inside the same transaction as the placement_rules save).
+
+    This has no side effects itself — callers own persistence, which is
+    what makes it safe to use inside a transaction with rollback.
+
+    Returns (users_ops, student_cohort_ops, recalculated_count).
+    """
+    placement_ready = rules.get("placementReadyThreshold", 75)
+    near_ready = rules.get("nearReadyThreshold", 50)
+    a_weight = rules.get("assessmentWeight", 50)
+    i_weight = rules.get("interviewWeight", 50)
+    total_weight = (a_weight + i_weight) or 100
+
+    def cohort_for(score):
+        if score >= placement_ready:
+            return "A"
+        if score >= near_ready:
+            return "B"
+        return "C"
+
+    users_ops = []
+    student_cohort_ops = []
+    recalculated = 0
+    ts = now()
+
+    # ---- Engine 1: baseline assessment + manual interview -------------
+    # NOTE: login.py seeds every new student with baselineAssessmentScore
+    # and interviewScore explicitly set to None (not yet scored) — so
+    # those fields always "$exists". Filtering on $exists alone pulls in
+    # every unscored student too, and None * a_weight below then blows up
+    # with "unsupported operand type(s) for *: 'NoneType' and 'float'".
+    # Matching check_and_generate_cohort()'s single-student equivalent,
+    # require an actual (non-null) value on both fields.
+    engine1_ids = set()
+    for student in db.users.find(
+        {"role": "student", "baselineAssessmentScore": {"$ne": None},
+         "interviewScore": {"$ne": None}},
+        {"_id": 1, "cohort": 1, "baselineAssessmentScore": 1,
+         "interviewScore": 1, "rollNumber": 1},
+    ):
+        engine1_ids.add(student["_id"])
+        final_score = round(
+            (student["baselineAssessmentScore"] * a_weight
+             + student["interviewScore"] * i_weight) / total_weight, 2,
+        )
+        new_cohort = cohort_for(final_score)
+        if student.get("cohort") != new_cohort:
+            recalculated += 1
+        users_ops.append(UpdateOne(
+            {"_id": student["_id"]},
+            {"$set": {
+                "cohort": new_cohort,
+                "finalEmployabilityScore": final_score,
+                "cohortAssignedAt": ts,
+                "cohortAssignedFrom": "assessment_plus_interview",
+            }},
+        ))
+        student_cohort_ops.append(UpdateOne(
+            {"studentId": student["_id"]},
+            {"$set": {
+                "studentId": student["_id"],
+                "rollNumber": student.get("rollNumber"),
+                "averageScore": final_score,
+                "cohort": new_cohort,
+                "lastUpdated": ts,
+                "source": "assessment_plus_interview",
+            }},
+            upsert=True,
+        ))
+
+    # ---- Engine 2: validated Create-Quiz results (average finalAverage)
+    quiz_averages = {
+        row["_id"]: round(row["avgScore"], 2)
+        for row in db.quiz_attempts.aggregate([
+            {"$match": {"resultStatus": RESULT_STATUS_VALIDATED, "finalAverage": {"$ne": None}}},
+            {"$group": {"_id": "$studentId", "avgScore": {"$avg": "$finalAverage"}}},
+        ])
+    }
+    candidate_ids = [sid for sid in quiz_averages if sid not in engine1_ids]
+    if candidate_ids:
+        # Same precedence guard as recompute_cohort_from_quiz_results(): a
+        # cohort "owned" by the assessment+interview engine is left alone.
+        for student in db.users.find(
+            {"_id": {"$in": candidate_ids}},
+            {"_id": 1, "cohort": 1, "cohortAssignedFrom": 1, "rollNumber": 1},
+        ):
+            if student.get("cohortAssignedFrom") == "assessment_plus_interview":
+                continue
+            avg_score = quiz_averages[student["_id"]]
+            new_cohort = cohort_for(avg_score)
+            if student.get("cohort") != new_cohort:
+                recalculated += 1
+            users_ops.append(UpdateOne(
+                {"_id": student["_id"]},
+                {"$set": {
+                    "cohort": new_cohort,
+                    "finalEmployabilityScore": avg_score,
+                    "cohortAssignedAt": ts,
+                    "cohortAssignedFrom": "quiz_validation_average",
+                }},
+            ))
+            student_cohort_ops.append(UpdateOne(
+                {"studentId": student["_id"]},
+                {"$set": {
+                    "studentId": student["_id"],
+                    "rollNumber": student.get("rollNumber"),
+                    "averageScore": avg_score,
+                    "cohort": new_cohort,
+                    "lastUpdated": ts,
+                    "source": "quiz_validation_average",
+                }},
+                upsert=True,
+            ))
+
+    return users_ops, student_cohort_ops, recalculated
+
+
 def backfill_student_cohorts(db):
     """
     SYNCHRONIZE EXISTING DATA (spec Part 5): a retroactive, idempotent
@@ -454,17 +735,11 @@ def init_quiz_result_fields():
 #     thresholds invented just for this feature.
 # ------------------------------------------------------------
 def top_cohort_label(db):
-    """Whichever cohort currently has the highest 'min' threshold in
-    db.placement_rules.cohortRanges is the platform's top / readiest
-    band right now (e.g. 'A' with the default seed). Never hardcoded
-    to the literal letter 'A' — if a Super Admin ever re-labels or
-    re-orders the bands, this keeps tracking whichever one is actually
-    highest, exactly as configured."""
-    rules = get_placement_rules(db)
-    bands = rules.get("cohortRanges", [])
-    if not bands:
-        return "A"
-    return max(bands, key=lambda b: b["min"])["cohort"]
+    """The platform's top / readiest cohort. With the three-threshold
+    Placement Rules model (placementReadyThreshold is, by validation,
+    always >= nearReadyThreshold — see superadmin.py's Save Rules
+    validation), Cohort A / "Placement Ready" is always the top band."""
+    return "A"
 
 
 def compute_placement_readiness(db, overall_score, overall_cohort):

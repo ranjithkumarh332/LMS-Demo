@@ -204,6 +204,29 @@ try:
     db.quiz_attempts.create_index([("college", 1), ("resultStatus", 1)])
     db.quiz_attempts.create_index([("studentId", 1), ("status", 1)])
 
+    # Schedule Session (Super Admin > Schedule Session, superadmin.py) —
+    # db.workshop_sessions. collegeIds/departmentIds/trainerIds are each
+    # arrays of ObjectId, so a multikey index on any one of them also
+    # speeds up "does college X have any sessions" style lookups.
+    db.workshop_sessions.create_index("status")
+    db.workshop_sessions.create_index("collegeIds")
+    db.workshop_sessions.create_index("departmentIds")
+    db.workshop_sessions.create_index("trainerIds")
+    db.workshop_sessions.create_index("date")
+
+    # Attendance (Super Admin > Attendance, superadmin.py) — db.attendance.
+    # One document per student per date: the unique compound index both
+    # keeps lookups O(log n) and enforces "no duplicate attendance for the
+    # same student on the same day" at the database layer (upserts update
+    # the existing record rather than inserting a second one).
+    db.attendance.create_index(
+        [("studentId", 1), ("date", 1)],
+        unique=True,
+        partialFilterExpression={"studentId": {"$type": "objectId"}},
+    )
+    db.attendance.create_index([("date", 1), ("college", 1)])
+    db.attendance.create_index("markedBy.id")
+
     # Activity logging — powers Recent Activity on every dashboard
     db.activity_log.create_index([("college", 1), ("createdAt", -1)])
     db.activity_log.create_index([("studentId", 1), ("createdAt", -1)])
@@ -258,7 +281,7 @@ app.register_blueprint(auth_bp, url_prefix="/api/auth")
 # Quiz Management & Dashboard modules — each owns one role's routes and
 # all three share quiz_common.py so cohort/placement-rule logic can
 # never drift out of sync between dashboards.
-app.register_blueprint(init_superadmin(db=db), url_prefix="/api/admin")
+app.register_blueprint(init_superadmin(db=db, bcrypt=bcrypt), url_prefix="/api/admin")
 app.register_blueprint(init_trainer(db=db), url_prefix="/api/trainer")
 app.register_blueprint(init_student(db=db), url_prefix="/api/student")
 
@@ -276,7 +299,7 @@ app.register_blueprint(init_question_bank(db=db, scope="super_admin"), url_prefi
 
 # College Management — /api/admin/colleges (Super Admin CRUD) and
 # /api/public/colleges (unauthenticated dropdown reads).
-app.register_blueprint(init_colleges(db=db), url_prefix="/api")
+app.register_blueprint(init_colleges(db=db, bcrypt=bcrypt), url_prefix="/api")
 
 # College Admin — read-only Assessment Management, scoped to their
 # own assigned college. No create/update/delete routes exist here.

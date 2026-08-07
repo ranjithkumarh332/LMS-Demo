@@ -282,6 +282,30 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .kpi-delta.up{ color:var(--teal-dark); } [data-theme="dark"] .kpi-delta.up{ color:var(--teal); }
 .kpi-delta.down{ color:var(--rose); }
 
+/* Attendance Management page */
+.att-overview{ display:flex; gap:28px; align-items:center; flex-wrap:wrap; }
+.att-overview .kpi-grid{ flex:1; min-width:280px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+.att-ring-wrap{ position:relative; width:176px; height:176px; flex-shrink:0; }
+.att-ring{ transform:rotate(-90deg); }
+.att-ring-bg{ fill:none; stroke:var(--line); stroke-width:14; }
+.att-ring-fill{ fill:none; stroke-width:14; stroke-linecap:round; transition:stroke-dasharray .8s ease; }
+.att-ring-center{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; }
+.att-ring-center b{ font-family:var(--font-display); font-size:34px; font-weight:700; line-height:1; }
+.att-ring-center span{ font-size:11px; color:var(--text-soft); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+.att-legend{ display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-soft); font-family:var(--font-mono); }
+.att-legend-dot{ width:10px; height:10px; border-radius:3px; display:inline-block; }
+.att-month-bars{ display:flex; align-items:flex-end; gap:18px; min-height:200px; padding:24px 6px 6px; overflow-x:auto; }
+.att-month-col{ flex:1 1 0; min-width:78px; display:flex; flex-direction:column; align-items:center; gap:8px; }
+.att-bar-area{ width:100%; height:132px; display:flex; align-items:flex-end; justify-content:center; }
+.att-bar-wrap{ display:flex; flex-direction:column; justify-content:flex-end; width:24px; height:100%; border-radius:6px; overflow:hidden; background:var(--line); }
+.att-bar-seg{ width:100%; }
+.att-bar-seg.teal{ background:linear-gradient(180deg, var(--teal), var(--teal-dark)); }
+.att-bar-seg.rose{ background:linear-gradient(180deg, var(--rose), #C0392B); }
+.att-month-meta{ text-align:center; }
+.att-month-meta b{ display:block; font-size:12px; font-family:var(--font-mono); }
+.att-month-meta span{ display:block; font-size:11px; color:var(--text-soft); margin-top:3px; }
+.pager{ display:flex; align-items:center; justify-content:center; gap:16px; margin-top:16px; padding-top:14px; border-top:1px dashed var(--line); }
+
 /* Profile summary strip on Dashboard Home */
 .profile-strip{
   display:flex; align-items:center; gap:20px; background:var(--paper-raised); border:1px solid var(--line);
@@ -753,7 +777,7 @@ body.exam-mode-active{ overflow:hidden; }
       <div class="nav-item" data-page="rankings"><span class="nav-icon">🏆</span>Rankings</div>
 
       <div class="nav-group-label">Activity</div>
-      <div class="nav-item" data-page="attendance"><span class="nav-icon">🗓️</span>Attendance</div>
+      <div class="nav-item" data-page="attendance"><span class="nav-icon">🗓️</span>Attendance Management</div>
       <div class="nav-item" data-page="events"><span class="nav-icon">📢</span>Events</div>
       <div class="nav-item" data-page="calendar"><span class="nav-icon">📅</span>Calendar</div>
       <div class="nav-item" data-page="notifications"><span class="nav-icon">🔔</span>Notifications<span class="nav-item-badge" id="navNotifBadge">3</span></div>
@@ -825,6 +849,7 @@ body.exam-mode-active{ overflow:hidden; }
       <div class="kpi-label">Overall Score</div>
       <div class="kpi-value" id="dashReadinessValue">—</div>
       <span class="badge badge-amber" style="margin-top:6px;" id="dashReadinessBadge">—</span>
+      <span class="badge" style="margin-top:6px;" id="dashReadinessStatusBadge">—</span>
     </div>
   </div>
 
@@ -1156,26 +1181,53 @@ body.exam-mode-active{ overflow:hidden; }
      PAGE: ATTENDANCE
 ============================================================ -->
 <section class="page" id="page-attendance">
-  <div class="section-head"><div><h2>Attendance</h2><p>Overall, workshop and intervention attendance history</p></div></div>
-  <div class="kpi-grid" style="margin-bottom:20px;" id="attendanceKpiGrid">
-    <div class="kpi-card"><div class="kpi-label">Overall Attendance</div><div class="kpi-value">—</div></div>
-    <div class="kpi-card"><div class="kpi-label">Workshop Attendance</div><div class="kpi-value">—</div></div>
-    <div class="kpi-card"><div class="kpi-label">Intervention Attendance</div><div class="kpi-value">—</div></div>
-    <div class="kpi-card"><div class="kpi-label">This Month</div><div class="kpi-value">—</div></div>
-  </div>
-  <div class="grid grid-2" style="align-items:start;">
-    <div class="card">
-      <div class="card-head"><h3>Monthly Attendance</h3></div>
-      <div class="chart-box" id="attendanceBarBox"><p class="cell-sub">Loading…</p></div>
+  <div class="section-head"><div><h2>Attendance Management</h2><p>Your class attendance — marked by the Super Admin</p></div></div>
+
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-head"><h3>Attendance Overview</h3><span class="cell-sub">Overall — all time</span></div>
+    <div class="att-overview">
+      <div id="attendanceRing"></div>
+      <div class="kpi-grid">
+        <div class="kpi-card"><div class="kpi-label">Total Classes</div><div class="kpi-value" id="attTotal">—</div></div>
+        <div class="kpi-card"><div class="kpi-label">Present</div><div class="kpi-value" id="attPresent">—</div></div>
+        <div class="kpi-card"><div class="kpi-label">Absent</div><div class="kpi-value" id="attAbsent">—</div></div>
+        <div class="kpi-card"><div class="kpi-label">Last Updated</div><div class="kpi-value" id="attLastUpdated"><span>—</span></div></div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-head"><h3>Attendance History</h3></div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Date</th><th>Session</th><th>Type</th><th>Status</th></tr></thead>
-        <tbody id="attendanceHistoryBody">
-          <tr><td colspan="4" class="cell-sub">Loading attendance history…</td></tr>
-        </tbody>
-      </table></div>
+  </div>
+
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-head"><h3>This Month Attendance</h3><span class="cell-sub" id="attMonthLabel">—</span></div>
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-label">Classes This Month</div><div class="kpi-value" id="attMonthTotal">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Present</div><div class="kpi-value" id="attMonthPresent">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Absent</div><div class="kpi-value" id="attMonthAbsent">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Attendance This Month</div><div class="kpi-value" id="attMonthPct">—</div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-head"><h3>Monthly Attendance Graph</h3>
+      <span class="att-legend">
+        <span class="att-legend-dot" style="background:var(--teal);"></span> Present
+        <span class="att-legend-dot" style="background:var(--rose); margin-left:12px;"></span> Absent
+      </span>
+    </div>
+    <div class="att-month-bars" id="attendanceMonthBars"><p class="cell-sub">Loading monthly attendance…</p></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Attendance History</h3></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Status</th><th>Marked By</th></tr></thead>
+      <tbody id="attendanceHistoryBody">
+        <tr><td colspan="3" class="cell-sub">Loading attendance history…</td></tr>
+      </tbody>
+    </table></div>
+    <div class="pager" id="attendancePager" style="display:none;">
+      <button class="btn btn-ghost btn-sm" id="attPrevBtn" onclick="attPage(-1)">‹ Prev</button>
+      <span id="attPageInfo" class="cell-sub"></span>
+      <button class="btn btn-ghost btn-sm" id="attNextBtn" onclick="attPage(1)">Next ›</button>
     </div>
   </div>
 </section>
@@ -1483,7 +1535,7 @@ const pageTitles = {
   dashboard:['Overview','Dashboard Home'], assessments:['Assessments','My Assessments'],
   quizhistory:['Assessments','Quiz History'], cohort:['Growth','My Cohort'], workshops:['Growth','Workshops & Interventions'],
   progress:['Growth','Progress Dashboard'], readiness:['Growth','Placement Readiness'], roadmap:['Growth','Career Readiness Roadmap'],
-  rankings:['Growth','Rankings'], attendance:['Activity','Attendance'], events:['Activity','Events'], calendar:['Activity','Calendar'],
+  rankings:['Growth','Rankings'], attendance:['Activity','Attendance Management'], events:['Activity','Events'], calendar:['Activity','Calendar'],
   notifications:['Activity','Notifications'], reports:['Account','Reports'], profile:['Account','Profile'], settings:['Account','Settings']
 };
 function goToPage(name){
@@ -1713,30 +1765,122 @@ async function loadProgressDashboard(){
 ============================================================ */
 async function loadAttendance(){
   const { ok, data } = await apiGet('/attendance');
-  const kpiGrid = document.getElementById('attendanceKpiGrid');
+  const ringEl = document.getElementById('attendanceRing');
   const historyBody = document.getElementById('attendanceHistoryBody');
-  const barBox = document.getElementById('attendanceBarBox');
   if (!ok || !data){
-    kpiGrid.innerHTML = '<div class="kpi-card"><div class="kpi-label">Overall Attendance</div><div class="kpi-value">—</div></div>';
-    historyBody.innerHTML = '<tr><td colspan="4" class="cell-sub">Could not load attendance history.</td></tr>';
-    barBox.innerHTML = '<div class="empty-state"><div class="empty-icon">🗓️</div><h4>No attendance data available.</h4></div>';
+    ringEl.innerHTML = '<p class="cell-sub">Attendance unavailable right now.</p>';
+    historyBody.innerHTML = '<tr><td colspan="3" class="cell-sub">Could not load attendance history.</td></tr>';
     return;
   }
-  const stats = data.stats || {};
-  kpiGrid.innerHTML = `
-    <div class="kpi-card"><div class="kpi-label">Overall Attendance</div><div class="kpi-value">${stats.overall ?? '—'}<span>%</span></div></div>
-    <div class="kpi-card"><div class="kpi-label">Workshop Attendance</div><div class="kpi-value">${stats.workshop ?? '—'}<span>%</span></div></div>
-    <div class="kpi-card"><div class="kpi-label">Intervention Attendance</div><div class="kpi-value">${stats.intervention ?? '—'}<span>%</span></div></div>
-    <div class="kpi-card"><div class="kpi-label">This Month</div><div class="kpi-value">${stats.thisMonth ?? '—'}<span>%</span></div></div>`;
+  const att = data.attendance || {};
+  const total = att.total ?? 0;
+  const present = att.present ?? 0;
+  const absent = att.absent ?? 0;
+  const pct = Math.round(att.percentage ?? 0);
+  ringEl.innerHTML = attendanceRing(total > 0 ? pct : null);
+  document.getElementById('attTotal').textContent = total;
+  document.getElementById('attPresent').textContent = present;
+  document.getElementById('attAbsent').textContent = absent;
+  document.getElementById('attLastUpdated').innerHTML = att.lastUpdated
+    ? `<span>${fmtDate(att.lastUpdated)} · ${fmtTime(att.lastUpdated)}</span>`
+    : '<span>Not marked yet</span>';
 
-  const monthly = data.monthly || [];
-  if (monthly.length){ barBox.innerHTML = ''; drawBarChart('attendanceBarBox', monthly.map(m=>m.label), monthly.map(m=>m.value), 100); }
-  else { barBox.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><h4>No monthly attendance data yet.</h4></div>'; }
+  const tm = att.thisMonth || {};
+  const tmLabel = tm.month ? monthLabel(tm.month) : '—';
+  document.getElementById('attMonthLabel').textContent = tmLabel;
+  document.getElementById('attMonthTotal').textContent = tm.total ?? 0;
+  document.getElementById('attMonthPresent').textContent = tm.present ?? 0;
+  document.getElementById('attMonthAbsent').textContent = tm.absent ?? 0;
+  document.getElementById('attMonthPct').textContent = (tm.total || 0) > 0
+    ? `${Math.round(tm.percentage ?? 0)}%`
+    : '—';
 
-  const history = data.history || [];
-  historyBody.innerHTML = history.length
-    ? history.map(h => `<tr><td>${fmtDate(h.date) || h.date}</td><td>${h.session}</td><td>${h.type}</td><td><span class="badge ${h.status === 'Present' ? 'badge-teal' : 'badge-rose'}">${h.status}</span></td></tr>`).join('')
-    : '<tr><td colspan="4" class="cell-sub">No attendance history available.</td></tr>';
+  renderAttendanceMonthBars(att.monthly || []);
+
+  window.__attendanceHistory = att.history || [];
+  window.__attPage = 0;
+  renderAttendancePage();
+}
+
+function monthLabel(ym){
+  if (!ym) return '—';
+  const [y, m] = ym.split('-').map(Number);
+  if (!y || !m) return ym;
+  return new Date(y, m - 1, 1).toLocaleString('en', { month: 'short' }) + ' ' + String(y).slice(2);
+}
+
+function renderAttendanceMonthBars(monthly){
+  const el = document.getElementById('attendanceMonthBars');
+  if (!monthly.length){
+    el.innerHTML = '<p class="cell-sub" style="padding:16px;">No monthly data yet — classes marked by the Super Admin will appear here.</p>';
+    return;
+  }
+  const maxTotal = Math.max(1, ...monthly.map(m => m.total || 0));
+  el.innerHTML = monthly.map(m => {
+    const p = m.present || 0, a = m.absent || 0, t = m.total || 0;
+    const pct = t ? Math.round((p / t) * 100) : 0;
+    const pH = (p / maxTotal) * 100, aH = (a / maxTotal) * 100;
+    return `<div class="att-month-col">
+      <div class="att-bar-area">
+        <div class="att-bar-wrap" title="${p} Present · ${a} Absent">
+          ${p > 0 ? `<div class="att-bar-seg teal" style="height:${pH}%;"></div>` : ''}
+          ${a > 0 ? `<div class="att-bar-seg rose" style="height:${aH}%;"></div>` : ''}
+        </div>
+      </div>
+      <div class="att-month-meta"><b>${monthLabel(m.month)}</b><span>${p}/${t} · ${pct}%</span></div>
+    </div>`;
+  }).join('');
+}
+
+function attendanceRing(pct){
+  const size = 176, stroke = 14;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const hasData = typeof pct === 'number';
+  const val = Math.max(0, Math.min(100, pct || 0));
+  const filled = (val / 100) * c;
+  const color = hasData ? (val >= 75 ? 'var(--teal)' : val >= 50 ? 'var(--amber-dark)' : 'var(--rose)') : 'var(--line)';
+  return `
+    <div class="att-ring-wrap">
+      <svg class="att-ring" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
+        <circle class="att-ring-bg" cx="${size/2}" cy="${size/2}" r="${r}"></circle>
+        ${hasData ? `<circle class="att-ring-fill" stroke="${color}" cx="${size/2}" cy="${size/2}" r="${r}" stroke-dasharray="${filled.toFixed(2)} ${c.toFixed(2)}"></circle>` : ''}
+      </svg>
+      <div class="att-ring-center"><b>${hasData ? val + '%' : '—'}</b><span>Overall Attendance</span></div>
+    </div>`;
+}
+
+function renderAttendancePage(){
+  const history = window.__attendanceHistory || [];
+  const pageSize = 10;
+  const pages = Math.max(1, Math.ceil(history.length / pageSize));
+  const page = Math.min(Math.max(0, window.__attPage || 0), pages - 1);
+  window.__attPage = page;
+  const slice = history.slice(page * pageSize, page * pageSize + pageSize);
+  const body = document.getElementById('attendanceHistoryBody');
+  body.innerHTML = slice.length
+    ? slice.map(h => {
+        const present = h.status === 'present';
+        return `<tr><td>${fmtDate(h.date) || h.date}</td><td><span class="badge ${present ? 'badge-teal' : 'badge-rose'}">${present ? 'Present' : 'Absent'}</span></td><td class="cell-sub">${h.markedBy || '—'}</td></tr>`;
+      }).join('')
+    : '<tr><td colspan="3" class="cell-sub">No attendance records yet — classes marked by the Super Admin will appear here.</td></tr>';
+  const pager = document.getElementById('attendancePager');
+  const info = document.getElementById('attPageInfo');
+  if (history.length > pageSize){
+    pager.style.display = 'flex';
+    info.textContent = `Page ${page + 1} of ${pages}`;
+    document.getElementById('attPrevBtn').disabled = page <= 0;
+    document.getElementById('attNextBtn').disabled = page >= pages - 1;
+  } else {
+    pager.style.display = 'none';
+  }
+}
+
+function attPage(dir){
+  const history = window.__attendanceHistory || [];
+  const pages = Math.max(1, Math.ceil(history.length / 10));
+  window.__attPage = Math.min(Math.max(0, (window.__attPage || 0) + dir), pages - 1);
+  renderAttendancePage();
 }
 
 /* ============================================================
@@ -2210,6 +2354,14 @@ async function loadDashboardSnapshot(){
     document.getElementById('snapshotRingFill').setAttribute('stroke-dashoffset', circumference - (circumference * overallScore / 100));
     document.getElementById('dashReadinessValue').innerHTML = `${overallScore}<span>/100</span>`;
     document.getElementById('dashReadinessBadge').textContent = overallCohortLabel;
+    // Placement Readiness status (Ready / Not Ready) — same value shown
+    // on the Placement Readiness page, computed server-side against the
+    // Super Admin's current cohort thresholds. Shown here too so it's
+    // visible anywhere on the Main Dashboard, not just its own page.
+    const readinessStatus = c.placementReadiness || {};
+    const statusBadgeEl = document.getElementById('dashReadinessStatusBadge');
+    statusBadgeEl.textContent = readinessStatus.statusLabel ? `Placement ${readinessStatus.statusLabel}` : '—';
+    statusBadgeEl.className = 'badge ' + (readinessStatus.ready ? 'badge-teal' : 'badge-amber');
     document.getElementById('ribbonOverallValue').textContent = c.overallScore != null ? `${c.overallScore}%` : '—';
     document.getElementById('ribbonInterviewValue').textContent = c.averageInterviewScore != null ? `${c.averageInterviewScore}/100` : '—';
     document.getElementById('ribbonCohortValue').textContent = overallCohortLabel;
