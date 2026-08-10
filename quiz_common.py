@@ -29,7 +29,7 @@ Collections used (created lazily by Mongo on first insert):
 import os
 import random
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -102,6 +102,29 @@ def iso_utc(dt):
     if not dt:
         return None
     return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).isoformat()
+
+
+# India Standard Time — Asia/Kolkata is a fixed UTC+5:30 (no DST), so an
+# explicit fixed offset is exact and never depends on the host OS tzdata.
+IST_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def ist_from_utc(dt):
+    """Convert a stored UTC datetime (aware, or naive-as-UTC as PyMongo
+    hands back) into IST. The single place timestamps are shifted to
+    Asia/Kolkata — the frontend never does its own hour arithmetic, so a
+    timestamp is never converted twice."""
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST_TZ)
+
+
+def fmt_ist(dt, fmt="%Y-%m-%d %H:%M"):
+    """IST display string for a stored UTC datetime, or None."""
+    ist = ist_from_utc(dt)
+    return ist.strftime(fmt) if ist else None
 
 
 def error(message, status=400):

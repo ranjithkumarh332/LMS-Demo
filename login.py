@@ -930,8 +930,16 @@ def init_auth(bcrypt, db, limiter, jwt, firebase_ready=False):
             return True
 
         if role == "super_admin":
-            record = super_admin_sessions.find_one({"_id": SUPER_ADMIN_SESSION_KEY})
+            record = super_admin_sessions.find_one({"_id": SUPER_ADMIN_SESSION_KEY}, {"sessionId": 1})
             current_sid = record.get("sessionId") if record else None
+            if current_sid == token_sid:
+                # Heartbeat — proves this account is actively using the portal
+                # right now, which is what the Super Admin "Active Users"
+                # dashboard counts (see superadmin.py /dashboard/live-stats).
+                super_admin_sessions.update_one(
+                    {"_id": SUPER_ADMIN_SESSION_KEY},
+                    {"$set": {"lastActiveAt": _now()}},
+                )
             return current_sid != token_sid
 
         identity = jwt_payload.get("sub")
@@ -943,7 +951,13 @@ def init_auth(bcrypt, db, limiter, jwt, firebase_ready=False):
         user = users.find_one({"_id": oid}, {"currentSessionId": 1, "approvalStatus": 1})
         if not user or user.get("approvalStatus") != "approved":
             return True
-        return user.get("currentSessionId") != token_sid
+        current_sid = user.get("currentSessionId")
+        if current_sid == token_sid:
+            # Heartbeat — see above; also what makes "Active Users" drop
+            # automatically after session expiry / idle timeouts.
+            users.update_one({"_id": oid}, {"$set": {"lastActiveAt": _now()}})
+            return False
+        return True
 
     @jwt.revoked_token_loader
     def _superseded_session_response(_jwt_header, _jwt_payload):

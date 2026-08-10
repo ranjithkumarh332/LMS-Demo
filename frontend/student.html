@@ -1993,11 +1993,12 @@ async function loadWorkshops(){
   upcomingGrid.innerHTML = upcoming.length
     ? upcoming.map((w, i) => `<div class="card">
         <div class="card-head"><h3>${w.name}</h3><span class="badge ${w.status === 'Upcoming' ? 'badge-amber' : 'badge-ink'}">${w.status}</span></div>
-        <p class="cell-sub">Trainer: ${w.trainer || 'To be assigned'} · Venue: ${w.venue || '—'}</p>
+        <p class="cell-sub">Trainer: ${w.trainer || 'To be assigned'} · ${w.mode === 'online' ? 'Online' : 'Venue: ' + (w.venue || '—')}</p>
         <p class="cell-sub">${w.dateLabel || ''}</p>
+        ${w.attendance && w.attendance !== 'Not marked' ? `<p class="cell-sub">Your attendance: <span class="badge ${w.attendance === 'Present' ? 'badge-teal' : 'badge-rose'}">${w.attendance}</span></p>` : ''}
         <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
           <button class="btn btn-ghost btn-sm" onclick="openWorkshopModal(${i})">View Details</button>
-          <button class="btn btn-ghost btn-sm" onclick="showToast('Added to calendar','success')">＋ Add to Calendar</button>
+          ${w.meetingLink && w.meetingLinkWindowOpen ? `<a class="btn btn-primary btn-sm" href="${w.meetingLink}" target="_blank" rel="noopener">Join Session</a>` : ''}
         </div>
       </div>`).join('')
     : '<div class="empty-state"><div class="empty-icon">🎓</div><h4>No upcoming workshops.</h4></div>';
@@ -2015,9 +2016,12 @@ function openWorkshopModal(index){
   document.getElementById('workshopModalDescription').textContent = w.description || 'Session details as provided by the platform.';
   document.getElementById('workshopModalDetailsBody').innerHTML = `
     <tr><td class="cell-sub">Trainer</td><td class="cell-strong">${w.trainer || 'To be assigned'}</td></tr>
-    <tr><td class="cell-sub">Venue</td><td class="cell-strong">${w.venue || '—'}</td></tr>
+    <tr><td class="cell-sub">Mode</td><td class="cell-strong">${w.mode === 'online' ? 'Online' : 'Offline'}</td></tr>
+    <tr><td class="cell-sub">Venue</td><td class="cell-strong">${w.mode === 'online' ? '—' : (w.venue || '—')}</td></tr>
     <tr><td class="cell-sub">Date & Time</td><td class="cell-strong">${w.dateLabel || '—'}</td></tr>
-    <tr><td class="cell-sub">Duration</td><td class="cell-strong">${w.duration || '—'}</td></tr>`;
+    <tr><td class="cell-sub">Duration</td><td class="cell-strong">${w.duration || '—'}</td></tr>
+    ${w.attendance && w.attendance !== 'Not marked' ? `<tr><td class="cell-sub">Your Attendance</td><td class="cell-strong">${w.attendance}</td></tr>` : ''}
+    ${w.meetingLink ? `<tr><td class="cell-sub">Join Link</td><td class="cell-strong"><a href="${w.meetingLink}" target="_blank" rel="noopener" style="color:var(--teal-dark);">${w.meetingLinkWindowOpen ? 'Join session' : 'Link available'}</a></td></tr>` : ''}`;
   openModal('modalWorkshop');
 }
 
@@ -2028,9 +2032,38 @@ async function loadEvents(){
   const grid = document.getElementById('eventsGrid');
   const { ok, data } = await apiGet('/events');
   const events = ok ? (data.events || []) : [];
+  window.__events = events;
   grid.innerHTML = events.length
-    ? events.map(e => `<div class="card"><div class="card-head"><h3>${e.title}</h3><span class="badge ${e.badgeClass || 'badge-ink'}">${e.badgeText || ''}</span></div><p class="cell-sub">${e.subtitle || ''}</p></div>`).join('')
+    ? events.map(e => `
+        <div class="card">
+          <div class="card-head"><h3>${e.title}</h3><span class="badge ${e.badgeClass || 'badge-ink'}">${e.label || e.badgeText || ''}</span></div>
+          <p class="cell-sub">${e.dateLabel || ''}</p>
+          ${e.description ? `<p class="cell-sub" style="margin-top:6px;">${e.description}</p>` : ''}
+          <p class="cell-sub" style="margin-top:6px;">${e.type === 'online' ? 'Online event' : 'Venue: ' + (e.venue || '—')}${e.mandatory ? ' · <span class="badge badge-rose">Mandatory</span>' : ''}</p>
+          ${e.joined ? `<p class="cell-sub" style="margin-top:6px;"><span class="badge badge-teal">You joined</span></p>` : ''}
+          <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
+            ${e.status === 'ongoing' && e.type === 'online'
+              ? (e.meetingLink
+                  ? `<button class="btn btn-primary btn-sm" onclick="joinEvent('${e.id}')">${e.joined ? 'Rejoin Session' : 'Join Session'}</button>`
+                  : `<button class="btn btn-ghost btn-sm" disabled>Link not shared yet</button>`)
+              : ''}
+            ${e.status === 'ongoing' && e.type === 'offline'
+              ? `<button class="btn btn-primary btn-sm" onclick="joinEvent('${e.id}')">${e.joined ? 'Mark Me Present' : 'I\u2019m Attending'}</button>`
+              : ''}
+          </div>
+        </div>`).join('')
     : '<div class="empty-state"><div class="empty-icon">📢</div><h4>No events available right now.</h4></div>';
+}
+
+async function joinEvent(eventId){
+  const { ok, data } = await apiPost('/events/' + eventId + '/join');
+  if (!ok){ alert((data && data.message) || 'Could not join the event right now.'); return; }
+  if (data.meetingLink){
+    window.open(data.meetingLink, '_blank', 'noopener');
+  } else {
+    alert('You\u2019re marked present. See you at the venue!');
+  }
+  loadEvents();
 }
 
 /* ============================================================

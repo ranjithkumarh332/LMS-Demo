@@ -1238,4 +1238,186 @@ def init_student(db):
             return error("Student not found.", 404)
         return ok({"attendance": attendance_summary(db, student["_id"])})
 
+    def _session_start_dt_local(doc):
+        date_str, start = doc.get("date"), doc.get("startTime")
+        if not (date_str and start):
+            return None
+        try:
+            return datetime.strptime(f"{date_str} {start}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            return None
+
+    def _student_workshop_public(doc, student):
+        """Student-facing view of a workshop session — the same document
+        superadmin.py serves admins, reduced to what a student needs plus
+        the student's own attendance mark and join state."""
+        date_str = doc.get("date")
+        start_dt = _session_start_dt_local(doc)
+        now_dt = datetime.now()
+        has_started = start_dt is not None and now_dt >= start_dt
+        window_open = (
+            doc.get("mode") == "online"
+            and start_dt is not None
+            and now_dt >= (start_dt - timedelta(hours=5))
+        )
+        attendance = None
+        if date_str:
+            attendance = db.attendance.find_one(
+                {"studentId": student["_id"], "date": date_str})
+        marked = None
+        if attendance:
+            st = attendance.get("status")
+            marked = "Present" if st == "present" else ("Absent" if st == "absent" else None)
+        if not has_started:
+            label = "Upcoming"
+        elif marked:
+            label = "Completed"
+        else:
+            label = "Session Live" if window_open or (start_dt and now_dt <= start_dt + timedelta(hours=5)) else "Completed"
+        return {
+            "id": str(doc["_id"]),
+            "name": doc.get("name"),
+            "description": doc.get("description"),
+            "trainer": ", ".join(doc.get("trainerNames", [])) or None,
+            "venue": doc.get("venue") or "—",
+            "mode": doc.get("mode") or "offline",
+            "date": date_str,
+            "dateLabel": f"{date_str or '—'} · {doc.get('startTime','')} – {doc.get('endTime','')}" if date_str else "—",
+            "duration": f"{doc.get('startTime','')} – {doc.get('endTime','')}" if doc.get("startTime") else "—",
+            "meetingLink": doc.get("meetingLink"),
+            "meetingLinkWindowOpen": bool(window_open),
+            "attendanceRequirement": doc.get("attendanceRequirement"),
+            "attendance": marked or "Not marked",
+            "status": label,
+        }
+
+    @bp.route("/workshops", methods=["GET"])
+    @role_required("student")
+    def my_workshops():
+        """Workshops & Interventions page — every scheduled workshop session
+        targeted at this student's college, split into upcoming and
+        completed/completed-past. Real data from db.workshop_sessions, with
+        the student's own attendance mark read live from db.attendance."""
+        student = _current_student()
+        if not student:
+            return error("Student not found.", 404)
+        college = student.get("college")
+        query = {"status": "scheduled"}
+        if college:
+            query["collegeNames"] = college
+        docs = list(db.workshop_sessions.find(query).sort("date", 1))
+        upcoming, completed = [], []
+        for d in docs:
+            start_dt = _session_start_dt_local(d)
+            p = _student_workshop_public(d, student)
+            finished = start_dt is not None and datetime.now() >= start_dt + timedelta(hours=5)
+            (completed if finished else upcoming).append(p)
+        return ok({"upcoming": upcoming, "completed": completed})
+
+    # ==========================================================
+    # EVENTS — Meetings & Events feed on the student dashboard.
+    # Mirrors the super_admin db.meetings collection (admin module):
+    # non-cancelled events visible to everyone, sorted by date/time.
+    # Status/join-window auto-advances server-side from the stored
+    # schedule (same wall-clock convention as superadmin._meeting_status,
+    # kept server-side so the browser is never the time source).
+    # Online events without a link yet are flagged "needs link".
+    # ==========================================================
+    def _event_status(doc):
+        if doc.get("status") == "cancelled":
+            return "cancelled"
+        date_str, time_str = doc.get("date"), doc.get("time")
+        if not (date_str and time_str):
+            return "upcoming"
+        try:
+            start_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            return "upcoming"
+        end_dt = start_dt + timedelta(minutes=int(doc.get("durationMinutes") or 60))
+        now_dt = datetime.now()
+        if now_dt < start_dt:
+            return "upcoming"
+        if now_dt > end_dt:
+            return "completed"
+        return "ongoing"
+
+    @bp.route("/events", methods=["GET"])
+    @role_required("student")
+    def my_events():
+        """Meetings & Events feed for the student dashboard — every
+        non-cancelled meeting/event, plus whether this student already
+        joined (meeting attendance is tracked separately from the class
+        attendance module in db.meeting_attendance)."""
+        student = _current_student()
+        if not student:
+            return error("Student not found.", 404)
+        docs = list(db.meetings.find({"status": {"$ne": "cancelled"}}).sort("date", 1))
+        joined_ids = {
+            r["meetingId"] for r in
+            db.meeting_attendance.find({"studentId": student["_id"]}, {"meetingId": 1})
+        }
+        events = []
+        for d in docs:
+            status = _event_status(d)
+            needs_link = d.get("type") == "online" and not d.get("meetingLink")
+            label, badge_class = {
+                "ongoing": ("Ongoing", "badge-teal"),
+                "upcoming": ("Upcoming", "badge-amber"),
+                "completed": ("Completed", "badge-ink"),
+            }.get(status, ("Upcoming", "badge-amber"))
+            events.append({
+                "id": str(d["_id"]),
+                "title": d.get("title"),
+                "description": d.get("description") or "",
+                "date": d.get("date"),
+                "time": d.get("time"),
+                "dateLabel": f"{d.get('date') or '—'} · {d.get('time') or '—'}"
+                             if d.get("date") else "—",
+                "durationMinutes": d.get("durationMinutes") or 60,
+                "type": d.get("type") or "offline",
+                "venue": d.get("venue"),
+                "meetingLink": d.get("meetingLink"),
+                "needsLink": needs_link,
+                "mandatory": bool(d.get("mandatory")),
+                "status": status,
+                "label": label,
+                "badgeClass": badge_class,
+                "joined": d["_id"] in joined_ids,
+            })
+        return ok({"events": events, "total": len(events)})
+
+    @bp.route("/events/<event_id>/join", methods=["POST"])
+    @role_required("student")
+    def join_event(event_id):
+        """Record a student joining a meeting/event (db.meeting_attendance,
+        tracked separately from the class attendance module). For an online
+        event the meeting link is returned; for offline, the venue. Joining
+        is idempotent — a second join doesn't create a duplicate."""
+        student = _current_student()
+        if not student:
+            return error("Student not found.", 404)
+        oid = to_object_id(event_id)
+        if not oid:
+            return error("Invalid event id.", 404)
+        meeting = db.meetings.find_one({"_id": oid, "status": {"$ne": "cancelled"}})
+        if not meeting:
+            return error("Event not found.", 404)
+        status = _event_status(meeting)
+        if status != "ongoing":
+            return error("This event is not currently open to join.")
+        link = meeting.get("meetingLink") if meeting.get("type") == "online" else None
+        if meeting.get("type") == "online" and not link:
+            return error("The meeting link has not been shared yet.")
+        db.meeting_attendance.update_one(
+            {"meetingId": oid, "studentId": student["_id"]},
+            {"$setOnInsert": {"meetingId": oid, "studentId": student["_id"], "joinedAt": now()}},
+            upsert=True,
+        )
+        return ok({
+            "eventId": str(oid),
+            "type": meeting.get("type"),
+            "meetingLink": link,
+            "venue": meeting.get("venue"),
+        }, message="Joining confirmed. See you there!")
+
     return bp

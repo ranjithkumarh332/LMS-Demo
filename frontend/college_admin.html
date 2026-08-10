@@ -892,6 +892,10 @@ function _mapStudentFromApi(s){
     email: s.email || '—',
     phone: '—',
     overall: s.finalEmployabilityScore != null ? Math.round(s.finalEmployabilityScore) : 0,
+    baseline: s.baselineAssessmentScore != null ? s.baselineAssessmentScore : null,
+    interview: s.interviewScore != null ? s.interviewScore : null,
+    finalEmployability: s.finalEmployabilityScore != null ? s.finalEmployabilityScore : null,
+    cohortKey: cohort,
     cohort: (COHORT_RULES.find(r=>r.key===cohort)||{}).label || cohort,
     status: cohort,                 // one of COHORT_RULES[].key — drives every filter/chip
     assessmentStatus: scored ? 'completed' : 'scheduled',
@@ -901,7 +905,8 @@ function _mapStudentFromApi(s){
     attendancePresent: attPresent,
     attendanceAbsent: attAbsent,
     attendanceLastUpdated: s.attendanceLastUpdated,
-    improvement: 0,
+    improvement: (s.baselineAssessmentScore != null && s.finalEmployabilityScore != null)
+      ? Math.max(0, Math.round(s.finalEmployabilityScore - s.baselineAssessmentScore)) : null,
     inactive: false,
     photo: null,
     idx: 0,
@@ -1437,7 +1442,7 @@ function studentAnalytics(){
       {value:STUDENTS.filter(s=>s.status==='entry_level').length,color:'var(--text-faint, #9a8f80)'},
     ],170,24,STUDENTS.length,'STUDENTS')}</div>
     <div class="card span-8"><h3 style="font-size:15px;margin-bottom:10px;">Average Score by Department</h3>${barChartSVG(DEPARTMENTS.map(d=>({label:d.name.split(' ')[0],value:d.avgScore})))}</div>
-    <div class="card span-12"><h3 style="font-size:15px;margin-bottom:10px;">Skill Category Averages</h3>${radarSVG(SKILL_CATEGORIES.slice(0,8).map(c=>({label:c.label, value: STUDENTS.length ? Math.round(STUDENTS.reduce((a,s)=>a+(s[c.key]||s.overall),0)/STUDENTS.length) : 0})),300)}</div>
+    <div class="card span-12"><h3 style="font-size:15px;margin-bottom:10px;">Performance Radar</h3>${radarSVG(rosterPerfEntries().map(p=>({label:p.label, value:p.value})),300)}</div>
   </div>`;
 }
 
@@ -1476,9 +1481,12 @@ function studentProfileTabContent(s, tab){
     <div class="card"><h3 style="font-size:15px;margin-bottom:12px;">Academic Snapshot</h3>
       <div style="display:flex;flex-direction:column;gap:12px;">
         <div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span>Overall Employability</span><b>${s.overall}%</b></div><div class="pbar"><i style="width:${s.overall}%;"></i></div></div>
+        <div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span>Baseline Assessment</span><b>${s.baseline!=null?Math.round(s.baseline)+'%':'—'}</b></div><div class="pbar teal"><i style="width:${s.baseline!=null?Math.max(0,Math.min(100,s.baseline)):0}%;"></i></div></div>
+        <div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span>Interview Score</span><b>${s.interview!=null?Math.round(s.interview)+'%':'—'}</b></div><div class="pbar ready"><i style="width:${s.interview!=null?Math.max(0,Math.min(100,s.interview)):0}%;"></i></div></div>
+        <div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span>Improvement (Baseline → Final)</span><b>${s.improvement!=null?'+'+s.improvement:'—'}</b></div><div class="pbar ready"><i style="width:${s.improvement!=null?Math.min(100,s.improvement*3):0}%;"></i></div></div>
+        <div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span>Cohort</span><b>${(COHORT_RULES.find(r=>r.key===s.cohortKey)||{}).label || s.cohort}</b></div></div>
         <div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span>Attendance</span><b>${s.attendance}%</b></div><div class="pbar teal"><i style="width:${s.attendance}%;"></i></div>
           <div style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--text-soft);"><span>Total <b style="color:var(--ink);">${s.attendanceTotal}</b></span><span>Present <b style="color:var(--ready);">${s.attendancePresent}</b></span><span>Absent <b style="color:var(--risk);">${s.attendanceAbsent}</b></span></div></div>
-        <div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span>Improvement (Baseline → Final)</span><b>+${s.improvement}</b></div><div class="pbar ready"><i style="width:${Math.min(100,s.improvement*3)}%;"></i></div></div>
       </div>
     </div>
   </div>`;
@@ -1755,7 +1763,7 @@ function cohortDetail(key){
     <div class="table-wrap"><table class="dt"><thead><tr><th>Student</th><th>Dept.</th><th>Score</th><th>Trainer</th><th>Attendance</th><th>Improvement</th><th>Progress</th></tr></thead><tbody>
       ${list.length?list.map(s=>`<tr class="row-clickable" data-action="nav" data-page="student-profile" data-id="${s.id}">
         <td><div style="display:flex;align-items:center;gap:10px;">${avatarChip(s.name,28)}<div class="cell-name">${s.name}</div></div></td>
-        <td class="cell-sub">${s.dept}</td><td>${s.overall}%</td><td class="cell-sub">${s.trainer}</td><td>${s.attendance}%</td><td style="color:var(--ready);font-weight:700;">+${s.improvement}</td>
+        <td class="cell-sub">${s.dept}</td><td>${s.overall}%</td><td class="cell-sub">${s.trainer}</td><td>${s.attendance}%</td><td style="color:var(--ready);font-weight:700;">${s.improvement!=null?'+'+s.improvement:'—'}</td>
         <td style="min-width:110px;"><div class="pbar"><i style="width:${s.overall}%;background:${rule.color};"></i></div></td>
       </tr>`).join(''):`<tr><td colspan="7"><div class="empty-state">${ic('target','icon-lg')}<h3>No students in this cohort</h3><p>Students will appear automatically once assessment scores match this rule.</p></div></td></tr>`}
     </tbody></table></div>
@@ -2155,20 +2163,33 @@ function renderStudentAssessmentSummary(res){
 /* ============================================================
    PAGE: ANALYTICS
 ============================================================ */
+function rosterPerfEntries(){
+  const avgNum = f => {
+    const vals = STUDENTS.map(s=>s[f]).filter(v=>typeof v==='number' && !isNaN(v));
+    return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length) : 0;
+  };
+  return [
+    {label:'Overall Employability', value:avgNum('overall')},
+    {label:'Baseline Assessment', value:avgNum('baseline')},
+    {label:'Interview Score', value:avgNum('interview')},
+    {label:'Attendance', value:avgNum('attendance')},
+  ];
+}
 function pageAnalytics(){
   loadStudents();
-  const avg = k => STUDENTS.length ? Math.round(STUDENTS.reduce((a,s)=>a+(s[k]||s.overall),0)/STUDENTS.length) : 0;
+  // Performance averages come straight from the /api/collegeadmin/students
+  // roster fields (finalEmployabilityScore / baselineAssessmentScore /
+  // interviewScore / attendancePct) — the same single source the Student
+  // Profile and College Admin KPIs use, so Analytics can never disagree.
+  const perf = rosterPerfEntries();
+  const perfOf = label => (perf.find(p=>p.label===label)||{}).value || 0;
   return `
-  <div class="section-head"><div><h2>Analytics</h2><p>Deep, interactive analytics across every assessment category and department.</p></div></div>
+  <div class="section-head"><div><h2>Analytics</h2><p>Performance across employability, assessments, interview, attendance and departments.</p></div></div>
   <div class="grid grid-4">
-    ${['comm','apt','tech','interview'].map(k=>{
-      const cat = SKILL_CATEGORIES.find(c=>c.key===k);
-      const v = avg(k);
-      return `<div class="kpi-card"><div class="kpi-label">${cat.label}</div><div class="kpi-value">${v}%</div><div class="pbar"><i style="width:${v}%;"></i></div></div>`;
-    }).join('')}
+    ${perf.map(p=>`<div class="kpi-card"><div class="kpi-label">${p.label}</div><div class="kpi-value">${p.value}%</div><div class="pbar"><i style="width:${p.value}%;"></i></div></div>`).join('')}
   </div>
   <div class="grid grid-12">
-    <div class="card span-6"><h3 style="font-size:15px;margin-bottom:10px;">Skill Category Radar</h3>${radarSVG(SKILL_CATEGORIES.slice(0,8).map(c=>({label:c.label, value:avg(c.key)})),300)}</div>
+    <div class="card span-6"><h3 style="font-size:15px;margin-bottom:10px;">Performance Radar</h3>${radarSVG(perf.map(p=>({label:p.label, value:p.value})),300)}</div>
     <div class="card span-6"><h3 style="font-size:15px;margin-bottom:10px;">Department Ranking</h3>
       ${DEPARTMENTS.length ? DEPARTMENTS.slice().sort((a,b)=>a.rank-b.rank).map(d=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);"><span class="rank-badge">#${d.rank}</span><span style="flex:1;font-size:13.5px;font-weight:600;">${d.name}</span><b>${d.avgScore}%</b></div>`).join('') : `<p class="cell-sub">No departments yet.</p>`}
     </div>

@@ -114,10 +114,10 @@ def compute_status(doc):
       active     -> published, current time is within [start, end] ("Live")
       completed  -> published (or was active) and current time is after end
       cancelled  -> manually cancelled (overrides the time-based cycle)
-      archived   -> manually archived by Super Admin (overrides everything)
+    (There is no "archived" state — see toggle_status; legacy records that
+    were archived before the feature was removed now fall through to their
+    time-based status, which for a finished quiz is "completed".)
     """
-    if doc.get("archived"):
-        return "archived"
     if doc.get("cancelled"):
         return "cancelled"
     if doc.get("state") != "published":
@@ -146,13 +146,8 @@ def deletable_now(doc):
 
 def cancellable_now(doc):
     """Only a Draft or Scheduled quiz can be cancelled (Live/Completed quizzes
-    run their course; use Archive to retire a Completed one instead)."""
+    run their course)."""
     return compute_status(doc) in ("draft", "scheduled")
-
-
-def archivable_now(doc):
-    """Only a Completed or Cancelled quiz can be archived."""
-    return compute_status(doc) in ("completed", "cancelled")
 
 
 def edit_block_message(doc):
@@ -163,8 +158,6 @@ def edit_block_message(doc):
         return "This quiz has been completed and is now read-only."
     if status == "cancelled":
         return "This quiz has been cancelled and can no longer be edited."
-    if status == "archived":
-        return "This quiz has been archived and is now read-only."
     return None
 
 
@@ -175,7 +168,6 @@ def serialize_quiz(doc):
     out["canEdit"] = editable_now(doc)
     out["canDelete"] = deletable_now(doc)
     out["canCancel"] = cancellable_now(doc)
-    out["canArchive"] = archivable_now(doc)
     questions = doc.get("questions") or []
     out["totalQuestions"] = len(questions)
     out["totalMarks"] = round(sum(float(q.get("marks") or 0) for q in questions), 2)
@@ -1484,8 +1476,9 @@ def init_quiz(db, scope):
         return ok({"quiz": serialize_quiz(updated)}, message="Quiz updated successfully.")
 
     # ----------------------------------------------------
-    # PUBLISH / UNPUBLISH / CANCEL / ARCHIVE — one endpoint, branching on
+    # PUBLISH / UNPUBLISH / CANCEL — one endpoint, branching on
     # the requested target status, each with its own eligibility rule.
+    # (There is no Archive action in this system.)
     # ----------------------------------------------------
     @bp.route("/quizzes/<quiz_id>/status", methods=["PATCH"])
     @role_required(role)
@@ -1497,19 +1490,14 @@ def init_quiz(db, scope):
 
         data = request.get_json(silent=True) or {}
         requested = str(data.get("status") or data.get("state") or "").strip().lower()
-        if requested not in ("draft", "published", "active", "scheduled", "cancelled", "archived"):
-            return error("status must be one of: draft, published, cancelled, archived.")
+        if requested not in ("draft", "published", "active", "scheduled", "cancelled"):
+            return error("status must be one of: draft, published, cancelled.")
 
         if requested == "cancelled":
             if not cancellable_now(doc):
                 return error("Only a Draft or Scheduled quiz can be cancelled.", 409)
             update = {"cancelled": True, "updatedAt": now(), "updatedBy": actor}
             action, verb = "quiz_cancelled", "cancelled"
-        elif requested == "archived":
-            if not archivable_now(doc):
-                return error("Only a Completed or Cancelled quiz can be archived.", 409)
-            update = {"archived": True, "updatedAt": now(), "updatedBy": actor}
-            action, verb = "quiz_archived", "archived"
         else:
             if not editable_now(doc):
                 return error(edit_block_message(doc), 409)

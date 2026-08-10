@@ -305,6 +305,12 @@ app.register_blueprint(init_colleges(db=db, bcrypt=bcrypt), url_prefix="/api")
 # own assigned college. No create/update/delete routes exist here.
 app.register_blueprint(init_collegeadmin(db=db), url_prefix="/api/collegeadmin")
 
+# Assessment Question Banks & Templates — serves the Super Admin's
+# GET /api/assessments/question-banks and /api/assessments/templates
+# (read-only, computed live from db.question_bank / db.quiz_sections).
+from assessments import init_assessments  # noqa: E402
+app.register_blueprint(init_assessments(db=db), url_prefix="/api/assessments")
+
 
 # ------------------------------------------------------------
 # 6. STATIC FRONTEND — serves the untouched HTML/CSS/JS as-is
