@@ -31,7 +31,7 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, request, send_file
 from flask_jwt_extended import get_jwt, get_jwt_identity
-from pymongo.errors import PyMongoError, OperationFailure, ConfigurationError
+from pymongo.errors import PyMongoError, OperationFailure, ConfigurationError, DuplicateKeyError
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -64,6 +64,7 @@ from quiz_common import (
     log_activity,
 )
 from colleges import resolve_active_college, resolve_active_department, _generate_temp_password
+from login import validate_password, validate_email, validate_mobile
 
 # Roles managed from the Super Admin "User Management" page. Super Admin
 # itself is the single hardcoded account (see login.py) and never appears
@@ -3161,6 +3162,88 @@ def init_superadmin(db, bcrypt=None):
     # 6. USER MANAGEMENT — Students, Trainers, College Admins, all
     #    read live from db.users. No hardcoded records anywhere.
     # ==========================================================
+    # "Add Trainer" — direct creation from the User Management page.
+    # The account is approved immediately (no Trainer Request → Review
+    # flow — that existing flow is untouched) but is flagged for
+    # first-login verification: login() issues NO session until the
+    # trainer sets their own password and confirms it with an OTP
+    # (see /api/auth/complete-first-login in login.py). No email is
+    # sent anywhere in this flow; the Super Admin gets the credentials
+    # right in the modal they just filled in.
+    @bp.route("/trainers", methods=["POST"])
+    @role_required("super_admin")
+    def create_trainer():
+        data = request.get_json(silent=True) or {}
+        full_name = (data.get("fullName") or "").strip()
+        email = (data.get("email") or "").strip().lower()
+        mobile = (data.get("mobile") or "").strip()
+        employee_id = (data.get("employeeId") or "").strip()
+        password = data.get("password") or ""
+        confirm_password = data.get("confirmPassword") or ""
+
+        if not full_name:
+            return error("Full name is required.")
+        email_err = validate_email(email)
+        if email_err:
+            return error(email_err)
+        mobile_err = validate_mobile(mobile)
+        if mobile_err:
+            return error(mobile_err)
+        if not employee_id:
+            return error("Employee ID is required.")
+        password_err = validate_password(password)
+        if password_err:
+            return error(password_err)
+        if password != confirm_password:
+            return error("Passwords do not match.")
+
+        if users.find_one({"email": email}):
+            return error("An account with this email already exists.")
+        if users.find_one({"role": "trainer", "employeeId": employee_id}):
+            return error("An account with this Employee ID already exists.")
+
+        if bcrypt is None:
+            return error("Trainer account creation is not available right now.", 503)
+
+        password_hash = bcrypt.generate_password_hash(password).decode("utf-8")
+        now_dt = now()
+        user_doc = {
+            "fullName": full_name,
+            "email": email,
+            "mobile": mobile,
+            "role": "trainer",
+            "employeeId": employee_id,
+            "passwordHash": password_hash,
+            "approvalStatus": "approved",
+            "approvedBy": get_jwt_identity(),
+            "approvedDate": now_dt,
+            # Force the trainer through first-login verification —
+            # they set their own password and confirm it with an OTP
+            # before any session is issued (see login.py).
+            "firstLoginVerify": True,
+            "firstLoginVerifiedAt": None,
+            "googleLogin": False,
+            "isDeleted": False,
+            "cohort": None,
+            "baselineAssessmentScore": None,
+            "interviewScore": None,
+            "finalEmployabilityScore": None,
+            "cohortAssignedAt": None,
+            "createdAt": now_dt,
+            "updatedAt": now_dt,
+        }
+        try:
+            users.insert_one(user_doc)
+        except DuplicateKeyError:
+            return error("An account with this email or Employee ID already exists.")
+
+        log_activity(
+            db, actor_id="super_admin", actor_role="super_admin",
+            action="user_created",
+            description=f"Created trainer account {full_name} ({email})",
+        )
+        return ok({"id": str(user_doc["_id"])}, message="Trainer account created.", status=201)
+
     @bp.route("/users", methods=["GET"])
     @role_required("super_admin")
     def list_users():

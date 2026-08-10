@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sign In — Employability Intelligence Platform</title>
-<meta name="description" content="Sign in, create an account, or reset your password on Employability Intelligence Platform.">
+<title>Sign In — ProCapSys</title>
+<meta name="description" content="Sign in, create an account, or reset your password on ProCapSys.">
 
 <!-- ============================================================
      FONTS — identical to homepage
@@ -121,6 +121,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   padding:22px 40px;
 }
 .brand{ display:flex; align-items:center; gap:10px; font-family:var(--font-display); font-weight:700; font-size:20px; }
+.auth-nav .brand-logo{ height:clamp(64px,10vw,110px); width:auto; display:block; flex:none; object-fit:contain; background:#fff; border:1px solid rgba(30,26,20,0.08); border-radius:14px; padding:12px 18px; box-shadow:0 10px 26px -14px rgba(30,26,20,0.35); }
 .brand-mark{
   width:34px; height:34px; border-radius:9px; background:linear-gradient(135deg, var(--amber), var(--rose));
   display:flex; align-items:center; justify-content:center; color:#12203B; font-weight:800; font-size:15px; font-family:var(--font-mono);
@@ -198,7 +199,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .auth-main{
   flex:1 1 54%;
   display:flex; align-items:center; justify-content:center;
-  padding:120px 40px 60px;
+  padding:200px 40px 60px;
   position:relative;
 }
 
@@ -388,7 +389,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 ============================================================ */
 @media (max-width: 980px){
   .auth-side{ display:none; }
-  .auth-main{ flex:1 1 100%; padding:110px 20px 50px; }
+  .auth-main{ flex:1 1 100%; padding:150px 20px 50px; }
 }
 @media (max-width: 520px){
   .auth-nav{ padding:18px 20px; }
@@ -413,9 +414,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
      MINI NAV
 ============================================================ -->
 <nav class="auth-nav">
-  <a href="index.html" class="brand">
-    <span class="brand-mark">E</span>
-    Employability Intelligence Platform
+  <a href="/" class="brand">
+    <img class="brand-logo" src="procapSys logo.png" alt="ProCapSys" loading="lazy">
   </a>
   <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">🌙</button>
 </nav>
@@ -431,7 +431,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     <div class="auth-blob blob-1"></div>
     <div class="auth-blob blob-2"></div>
     <div class="auth-side-content">
-      <span class="eyebrow">Employability Intelligence Platform</span>
+      <span class="eyebrow">ProCapSys</span>
       <h1>One account, <em>every</em> signal on your readiness.</h1>
       <p>Sign in to track skills, assessments, and placement progress in one connected workspace built for students, trainers, and institutions.</p>
       <div class="side-points">
@@ -456,7 +456,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       ============================================================ -->
       <section class="auth-panel active" id="panel-login">
         <div class="auth-head">
-          <h2>Welcome back</h2>
+          <h2>ProCapSys Welcomes You</h2>
           <p>Sign in to continue</p>
         </div>
 
@@ -674,6 +674,65 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
         </div>
       </section>
 
+      <!-- ============================================================
+           FIRST-LOGIN VERIFICATION PANEL
+           Shown when an account was created directly by the Super Admin
+           (POST /api/admin/trainers) and login() returns
+           requiresFirstLoginVerification. No session is issued until the
+           user sets their own password AND confirms it with an OTP
+           (POST /api/auth/complete-first-login).
+      ============================================================ -->
+      <section class="auth-panel" id="panel-first-login">
+        <div id="firstLoginFormWrap">
+          <div class="auth-head">
+            <h2>Verify your account</h2>
+            <p>Set your own password and confirm it with a code</p>
+          </div>
+
+          <form id="firstLoginForm" novalidate>
+            <div class="field has-value">
+              <input type="email" id="flEmail" readonly value=" ">
+              <label for="flEmail">Account email</label>
+            </div>
+
+            <div class="otp-row" style="margin-top:16px;">
+              <div class="field">
+                <input type="text" id="flOtp" maxlength="6" placeholder=" ">
+                <label for="flOtp">Email OTP</label>
+              </div>
+              <button type="button" class="btn btn-ghost btn-outline-sm" id="flSendOtp">Send OTP</button>
+              <button type="button" class="btn btn-accent btn-outline-sm" id="flVerifyOtp">Verify</button>
+            </div>
+            <div class="otp-status" id="flOtpStatus"><span class="otp-check">✓</span> Code verified</div>
+
+            <div class="field password-field" style="margin-top:22px;">
+              <input type="password" id="flNewPassword" placeholder=" " required>
+              <label for="flNewPassword">New password</label>
+              <span class="password-toggle" data-target="flNewPassword">👁</span>
+            </div>
+            <div class="field password-field">
+              <input type="password" id="flConfirmPassword" placeholder=" " required>
+              <label for="flConfirmPassword">Confirm password</label>
+              <span class="password-toggle" data-target="flConfirmPassword">👁</span>
+            </div>
+            <div class="field-hint" id="flMatchHint" style="margin-bottom:6px;"></div>
+            <div class="field-hint" style="margin-bottom:14px;">Min 8 characters with an uppercase letter, a lowercase letter, a number, and a special character.</div>
+
+            <!-- First-login verification API connected: POST /api/auth/complete-first-login -->
+            <button type="submit" class="btn btn-primary btn-block" id="flSubmit">Verify &amp; Continue</button>
+          </form>
+
+          <p class="auth-switch"><a href="#" class="link-teal" data-goto="login">← Back to login</a></p>
+        </div>
+
+        <!-- Success state, shown after submit, then auto-redirects to the dashboard -->
+        <div class="success-state" id="flSuccess">
+          <div class="success-mark"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6"/></svg></div>
+          <h3>Account verified</h3>
+          <p>Redirecting you to the dashboard…</p>
+        </div>
+      </section>
+
     </div>
   </main>
 </div>
@@ -706,12 +765,13 @@ themeToggle.addEventListener('click', () => {
 });
 
 /* ============================================================
-   JS — 3. PANEL SWITCHER (Login ↔ Create Account ↔ Forgot)
+   JS — 3. PANEL SWITCHER (Login ↔ Create Account ↔ Forgot ↔ First-login verify)
 ============================================================ */
 const panels = {
   login: document.getElementById('panel-login'),
   register: document.getElementById('panel-register'),
-  forgot: document.getElementById('panel-forgot')
+  forgot: document.getElementById('panel-forgot'),
+  'first-login': document.getElementById('panel-first-login')
 };
 function switchPanel(name){
   const current = document.querySelector('.auth-panel.active');
@@ -1134,6 +1194,55 @@ fpVerifyOtp.addEventListener('click', async () => {
 });
 
 /* ============================================================
+   JS — 11b. FIRST-LOGIN VERIFICATION (Super Admin-created accounts)
+   Wired to /api/auth with OTP purpose "first_login". The email is
+   fixed (taken from the login response, shown read-only); the user
+   sets their own password and confirms it with an OTP before any
+   session is issued (POST /complete-first-login).
+============================================================ */
+let flEmail = null;
+let flOtpToken = null;
+const flSendOtp = document.getElementById('flSendOtp');
+const flVerifyOtp = document.getElementById('flVerifyOtp');
+const flOtp = document.getElementById('flOtp');
+const flOtpStatus = document.getElementById('flOtpStatus');
+const flNewPassword = document.getElementById('flNewPassword');
+const flConfirmPassword = document.getElementById('flConfirmPassword');
+const flMatchHint = document.getElementById('flMatchHint');
+function checkFlMatch(){
+  const field = flConfirmPassword.closest('.field');
+  field.classList.remove('valid', 'invalid');
+  if (!flConfirmPassword.value){ flMatchHint.textContent = ''; return; }
+  if (flConfirmPassword.value === flNewPassword.value){ field.classList.add('valid'); flMatchHint.textContent = '✓ Passwords match'; }
+  else { field.classList.add('invalid'); flMatchHint.textContent = 'Passwords do not match'; }
+}
+flNewPassword.addEventListener('input', checkFlMatch);
+flConfirmPassword.addEventListener('input', checkFlMatch);
+flSendOtp.addEventListener('click', async () => {
+  hideFormAlert('first-login');
+  if (!flEmail){ showFormAlert('first-login', 'Account email is missing. Please log in again.'); return; }
+  flSendOtp.classList.add('is-loading');
+  const { ok, data } = await apiRequest('/send-otp', { email: flEmail, purpose: 'first_login' });
+  flSendOtp.classList.remove('is-loading');
+  if (ok){ flSendOtp.textContent = 'Resend OTP'; showFormAlert('first-login', 'OTP sent to your email.', 'success'); }
+  else { showFormAlert('first-login', data.message || 'Could not send OTP.'); }
+});
+flVerifyOtp.addEventListener('click', async () => {
+  hideFormAlert('first-login');
+  if (!flEmail){ showFormAlert('first-login', 'Account email is missing. Please log in again.'); return; }
+  if (flOtp.value.trim().length < 4) return;
+  flVerifyOtp.classList.add('is-loading');
+  const { ok, data } = await apiRequest('/verify-otp', { email: flEmail, purpose: 'first_login', otp: flOtp.value.trim() });
+  flVerifyOtp.classList.remove('is-loading');
+  if (ok){
+    flOtpToken = data.otpToken;
+    flOtpStatus.classList.add('show');
+  } else {
+    showFormAlert('first-login', data.message || 'Incorrect OTP.');
+  }
+});
+
+/* ============================================================
    JS — 12. FORM SUBMIT HANDLERS — wired to /api/auth
 ============================================================ */
 // Login
@@ -1149,11 +1258,68 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   const { ok, data } = await apiRequest('/login', { role, email, password });
   btn.classList.remove('is-loading');
 
+  if (ok && data.requiresFirstLoginVerification){
+    // Account created by the Super Admin — no session issued yet.
+    // Switch to the first-login verification panel to set a password
+    // and confirm it with an OTP (POST /complete-first-login).
+    flEmail = data.email || email;
+    flOtpToken = null;
+    document.getElementById('firstLoginForm').reset();
+    flOtpStatus.classList.remove('show');
+    flSendOtp.textContent = 'Send OTP';
+    document.getElementById('flEmail').value = flEmail;
+    switchPanel('first-login');
+    return;
+  }
+
   if (ok && data.redirect){
     window.location.href = data.redirect;
   } else {
     showFormAlert('login', data.message || 'Login failed. Please try again.');
   }
+});
+
+// First-login verification
+document.getElementById('firstLoginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  hideFormAlert('first-login');
+  const btn = document.getElementById('flSubmit');
+
+  if (!flEmail){ showFormAlert('first-login', 'Account email is missing. Please log in again.'); return; }
+  if (!flOtpToken){ showFormAlert('first-login', 'Please verify the OTP sent to your email first.'); return; }
+  if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/.test(flNewPassword.value)){
+    showFormAlert('first-login', 'Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character.');
+    return;
+  }
+  if (flNewPassword.value !== flConfirmPassword.value){
+    showFormAlert('first-login', 'Passwords do not match.');
+    return;
+  }
+
+  const payload = {
+    email: flEmail,
+    newPassword: flNewPassword.value,
+    confirmPassword: flConfirmPassword.value,
+    otpToken: flOtpToken
+  };
+
+  btn.classList.add('is-loading');
+  const { ok, data } = await apiRequest('/complete-first-login', payload);
+  btn.classList.remove('is-loading');
+
+  if (!ok){
+    flOtpToken = null;
+    flOtpStatus.classList.remove('show');
+    showFormAlert('first-login', data.message || 'Could not verify your account. Please try again.');
+    return;
+  }
+
+  flOtpToken = null;
+  document.getElementById('firstLoginFormWrap').style.display = 'none';
+  document.getElementById('flSuccess').classList.add('show');
+  setTimeout(() => {
+    window.location.href = data.redirect || 'trainer.html';
+  }, 1600);
 });
 
 // Create account

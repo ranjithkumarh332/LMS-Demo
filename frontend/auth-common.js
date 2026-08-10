@@ -1,5 +1,5 @@
 /* ============================================================
-   EIP AUTH-COMMON — shared session guard + logout module
+   ProCapSys AUTH-COMMON — shared session guard + logout module
    ============================================================
    Loaded by every authenticated dashboard (Super Admin, College Admin,
    Trainer, Student). This is the SINGLE implementation of:

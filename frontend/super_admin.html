@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Super Admin — Employability Intelligence Platform</title>
+<title>Super Admin — ProCapSys</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,450;0,9..144,600;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -108,7 +108,13 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   transition:width var(--transition), transform var(--transition);
 }
 .sidebar.collapsed{ width:var(--sidebar-w-c); }
-.sidebar-brand{ display:flex; align-items:center; gap:11px; padding:22px 20px; border-bottom:1px solid rgba(255,255,255,0.08); min-height:var(--topbar-h); }
+.sidebar-brand{ display:flex; align-items:flex-start; gap:12px; padding:20px 20px; border-bottom:1px solid rgba(255,255,255,0.08); }
+.sidebar-brand-main{ display:flex; flex-direction:column; align-items:flex-start; gap:12px; min-width:0; flex:1; }
+.sidebar-brand .brand-logo{ height:110px; width:auto; flex:none; object-fit:contain; display:block; background:#fff; border-radius:14px; padding:14px 18px; border:1px solid rgba(255,255,255,0.2); box-shadow:0 10px 26px -14px rgba(0,0,0,0.55); }
+.sidebar.collapsed .sidebar-brand{ padding:16px 0; justify-content:center; }
+.sidebar.collapsed .sidebar-brand-main{ align-items:center; gap:0; }
+.sidebar.collapsed .sidebar-brand .brand-logo{ height:30px; padding:5px 7px; border-radius:8px; }
+.sidebar.collapsed .brand-text{ display:none; }
 .brand-mark{ width:36px; height:36px; border-radius:10px; background:linear-gradient(135deg, var(--amber), var(--rose)); display:flex; align-items:center; justify-content:center; color:#1B1300; font-weight:800; font-size:14px; font-family:var(--font-mono); flex:none; box-shadow:var(--shadow-sm); }
 .brand-text{ font-family:var(--font-display); font-weight:700; font-size:16.5px; color:#fff; overflow:hidden; white-space:nowrap; opacity:1; transition:opacity .2s var(--transition); }
 .sidebar.collapsed .brand-text{ opacity:0; width:0; }
@@ -838,6 +844,7 @@ const ICONS = {
   layers:'<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
   users:'<circle cx="8.5" cy="8" r="3.2"/><path d="M2.5 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 13.2c2.5.4 4.5 2.6 4.5 5.3"/>',
   userCheck:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20.5c0-3.6 2.9-6.5 6.5-6.5s6.5 2.9 6.5 6.5"/><path d="M16.5 11l2 2 3.5-3.5"/>',
+  userPlus:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20.5c0-3.6 2.9-6.5 6.5-6.5s6.5 2.9 6.5 6.5"/><path d="M18 9v6M15 12h6"/>',
   book:'<path d="M4 5.2C4 4.5 4.6 4 5.3 4H12v16H5.3c-.7 0-1.3-.5-1.3-1.2z"/><path d="M20 5.2c0-.7-.6-1.2-1.3-1.2H12v16h6.7c.7 0 1.3-.5 1.3-1.2z"/>',
   sliders:'<path d="M4 6h9M17 6h3M4 12h3M9 12h11M4 18h13M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="7" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
   puzzle:'<path d="M9 4h4a1 1 0 0 1 1 1v2.2a1.6 1.6 0 0 0 2.8 1c.6-.7 1.7-.7 2.3 0a1.7 1.7 0 0 1 0 2.3c-.7.6-.7 1.7 0 2.3.6.7.6 1.7 0 2.3-.7.7-1.8.7-2.4 0a1.6 1.6 0 0 0-2.7 1V18a1 1 0 0 1-1 1h-4"/><path d="M9 19H5a1 1 0 0 1-1-1v-4a1 1 0 0 0-1.6-.8 1.7 1.7 0 0 1-2.1-2.6c.6-.6.6-1.7 0-2.3a1.7 1.7 0 0 1 2.1-2.6A1 1 0 0 0 4 5V5a1 1 0 0 1 1-1h4"/>',
@@ -917,6 +924,33 @@ function fmtRegDate(iso){
   const d = new Date(iso);
   if(isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
+
+/* ---- Super Admin 24-hour time formatting ----
+   This dashboard is exclusive to the Super Admin role, so every time value
+   shown here is forced to the standard HH:mm 24-hour format (never 12-hour
+   AM/PM). Centralized in these two helpers so every page/table/modal/report
+   uses the same formatting and no other role's dashboard is affected. */
+function saFmtTime(v){
+  if(v == null || v === '') return '—';
+  let d = v instanceof Date ? v : new Date(v);
+  if(isNaN(d.getTime())){
+    const t = String(v).trim();
+    const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i.exec(t);
+    if(!m) return '—';
+    let hh = parseInt(m[1], 10), mm = parseInt(m[2], 10);
+    const ap = (m[3]||'').toUpperCase();
+    if(ap === 'PM' && hh < 12) hh += 12;
+    if(ap === 'AM' && hh === 12) hh = 0;
+    return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+  }
+  return d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit', hour12:false });
+}
+function saFmtDateTime(v){
+  if(v == null || v === '') return '—';
+  const d = v instanceof Date ? v : new Date(v);
+  if(isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false });
 }
 
 // Approval stats used to drive sidebar counts (and, on the dashboard KPI
@@ -1251,7 +1285,7 @@ function mapQuizFromApi(q){
   const display = q.visibility === 'all'
     ? 'All Colleges'
     : (colleges.length ? colleges[0] + (colleges.length > 1 ? ` +${colleges.length - 1} more` : '') : '—');
-  const fmt = dt => dt ? new Date(dt).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : '—';
+  const fmt = dt => dt ? saFmtDateTime(dt) : '—';
   return {
     id: q.id,
     name: q.title || 'Untitled Quiz',
@@ -1540,7 +1574,7 @@ function formatLastLogin(iso){
   const d = new Date(iso);
   if(isNaN(d.getTime())) return '-';
   return d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}) + ' ' +
-         d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+         saFmtTime(d);
 }
 let USERS = [];
 async function loadUsersAdmin(){
@@ -2074,8 +2108,10 @@ function buildShell(){
     <div class="sidebar-backdrop" id="sidebarBackdrop" data-action="close-mobile-sidebar"></div>
     <aside class="sidebar" id="sidebar" role="navigation" aria-label="Super Admin navigation">
       <div class="sidebar-brand">
-        <div class="brand-mark">EI</div>
-        <div class="brand-text">Employability Intelligence<small>Super Admin</small></div>
+        <div class="sidebar-brand-main">
+          <img class="brand-logo" src="procapSys logo.png" alt="ProCapSys">
+          <div class="brand-text">ProCapSys<small>Super Admin</small></div>
+        </div>
         <button class="sidebar-mobile-close" id="sidebarMobileClose" data-action="close-mobile-sidebar" aria-label="Close menu">${ic('x','icon icon-sm')}</button>
       </div>
       <nav class="sidebar-scroll">
@@ -2357,8 +2393,8 @@ function pageDashboard(){
   <!-- ================= HERO BANNER (light, matches product reference) ================= -->
   <div class="hero-banner">
     <div class="hero-banner-copy">
-      <span class="hero-kicker">Welcome to EIP!</span>
-      <span class="hero-sub">Employability Intelligence Platform (EIP)</span>
+      <span class="hero-kicker">Welcome to ProCapSys!</span>
+      <span class="hero-sub">ProCapSys — Super Admin</span>
       <div class="hero-banner-actions">
         <button class="btn btn-accent btn-sm" data-action="nav" data-page="reports">Learn more</button>
       </div>
@@ -2925,7 +2961,7 @@ function pageCollegeProfile(id){
           <div style="display:flex;gap:10px;align-items:center;">${ic('building','icon icon-sm')}<span>${c.depts} department${c.depts===1?'':'s'} · ${c.students.toLocaleString()} students</span></div>
           <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:12px;display:flex;gap:12px;align-items:center;">
             ${avatarChip(c.adminName,38)}
-            <div><b style="font-size:13.5px;display:block;">${c.adminName}</b><span class="mono" style="font-size:11.5px;color:var(--text-faint);">College Admin · Last login ${c.lastLogin}</span></div>
+            <div><b style="font-size:13.5px;display:block;">${c.adminName}</b><span class="mono" style="font-size:11.5px;color:var(--text-faint);">College Admin · Last login ${saFmtDateTime(c.lastLogin)}</span></div>
           </div>
         </div>
       </div>
@@ -3240,7 +3276,7 @@ function pageUsers(){
   return `
   <div class="page-head">
     <div><p class="desc">Manage every account on the platform. Duplicate emails and duplicate role assignments are automatically prevented.</p></div>
-    <div class="page-actions"><button class="btn btn-accent btn-sm" data-action="open-status-by-email">${ic('key','icon icon-sm')}Activate/Deactivate by Email</button></div>
+    <div class="page-actions">${active==='Trainer'?`<button class="btn btn-primary btn-sm" data-action="open-add-trainer">${ic('userPlus','icon icon-sm')}Add Trainer</button>`:''}<button class="btn btn-accent btn-sm" data-action="open-status-by-email">${ic('key','icon icon-sm')}Activate/Deactivate by Email</button></div>
   </div>
   <div class="tabs">${roles.map(r=>`<button class="tab-btn ${active===r?'active':''}" data-action="tab" data-group="users" data-value="${r}">${r}s<span style="margin-left:6px;" class="mono">${USERS.filter(u=>u.role===r).length}</span></button>`).join('')}</div>
   <div class="toolbar">
@@ -3771,7 +3807,7 @@ function attPrint(){
     table{width:100%;border-collapse:collapse;margin-top:14px;} th,td{border:1px solid #DCD2C0;padding:6px 8px;font-size:12px;text-align:left;}
     th{background:#F5EEE2;} .present{color:#0E7B71;font-weight:700;} .absent{color:#B43020;font-weight:700;} .not{color:#9A8F80;}
     </style></head><body>
-    <h1>Attendance Records</h1><p>Date: ${esc(ATT_VIEW.date)} · Employability Intelligence Platform · Generated ${esc(new Date().toLocaleString())}</p>
+    <h1>Attendance Records</h1><p>Date: ${esc(ATT_VIEW.date)} · ProCapSys · Generated ${esc(saFmtDateTime(new Date()))}</p>
     <table><thead><tr>${columns.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
     <tbody>${rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${i===6?(c==='Present'?'present':c==='Absent'?'absent':'not'):''}">${esc(String(c))}</td>`).join('')}</tr>`).join('')}</tbody></table>
     </body></html>`);
@@ -3951,7 +3987,7 @@ function pageAssessmentsQuizResults(){
         <td class="row-title">${esc(r.studentName||'—')}</td><td class="mono">${esc(r.rollNumber||'—')}</td>
         <td>${esc(r.department||'—')}</td><td>${esc(r.college||'—')}</td><td>${esc(r.quizTitle||'—')}</td>
         <td class="mono">${r.percentageMarks!=null?r.percentageMarks+'%':'—'}</td>
-        <td class="mono">${r.submittedAt?new Date(r.submittedAt).toLocaleString():'—'}</td>
+        <td class="mono">${r.submittedAt?saFmtDateTime(r.submittedAt):'—'}</td>
       </tr>`).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:24px;">No students match these filters.</td></tr>`}</tbody>
   </table></div></div></div>`;
 }
@@ -4951,7 +4987,7 @@ function openConfirm({icon='alert', tone='amber', title, message, confirmLabel='
 function closeModal(){ document.getElementById('modal-root').innerHTML=''; PENDING_CONFIRM=null; }
 function downloadCSV(name){
   try{
-    const rows = [['Report', name],['Generated', new Date().toLocaleString()],['Platform','Employability Intelligence Platform']];
+    const rows = [['Report', name],['Generated', saFmtDateTime(new Date())],['Platform','ProCapSys']];
     const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], {type:'text/csv'});
     const url = URL.createObjectURL(blob);
@@ -5246,6 +5282,16 @@ case 'open-report-page': if(el.dataset.page) goPage(el.dataset.page); break;
       if(res.ok){ await loadUsersAdmin(); showToast(`${u.name} deleted`, true); renderPage(); }
       else { showToast(res.data?.message || 'Could not delete this account.', true); }
     }}); break; }
+    case 'open-add-trainer': openAddTrainerModal(); break;
+    case 'add-trainer-cancel': closeBigModal(); break;
+    case 'toggle-trainer-pass': {
+      const show = e.target.closest('[data-action="toggle-trainer-pass"]');
+      const showNow = (show.dataset.show||'0')==='0';
+      ['atPassword','atConfirm'].forEach(pid=>{ const i=document.getElementById(pid); if(i) i.type = showNow?'text':'password'; });
+      if(show) show.dataset.show = showNow?'1':'0';
+      if(show) show.innerHTML = (showNow?'Hide':'Show') + ` ${ic('eye','icon icon-sm')}`;
+      break;
+    }
 
     /* assessment management — quiz management */
     case 'open-quiz-wizard': openQuizModal(); break;
@@ -5275,7 +5321,7 @@ case 'open-report-page': if(el.dataset.page) goPage(el.dataset.page); break;
     break; }
 
     /* assessment management — quiz responses */
-    case 'view-response': { const r=QUIZ_RESPONSES[idx]; openConfirm({icon:'fileText', title:`${r.studentName||'—'} — ${r.assessmentName||'—'}`, message:`College: ${r.college||'—'} · Course: ${r.department||'—'} · Cohort: ${r.cohort||'—'} · Score: ${r.overallPercentage!=null?r.overallPercentage+'%':'—'} · Submitted: ${r.submittedAt?new Date(r.submittedAt).toLocaleString():'—'}.`, confirmLabel:'Close', onConfirm:()=>{}}); break; }
+    case 'view-response': { const r=QUIZ_RESPONSES[idx]; openConfirm({icon:'fileText', title:`${r.studentName||'—'} — ${r.assessmentName||'—'}`, message:`College: ${r.college||'—'} · Course: ${r.department||'—'} · Cohort: ${r.cohort||'—'} · Score: ${r.overallPercentage!=null?r.overallPercentage+'%':'—'} · Submitted: ${r.submittedAt?saFmtDateTime(r.submittedAt):'—'}.`, confirmLabel:'Close', onConfirm:()=>{}}); break; }
     case 'clear-resp-filters': {
       STATE.respFilters = { college:'all', cohort:'all', quiz:'all', department:'all', search:'' };
       (async () => { await loadQuizResponsesFilterOptions(); await Promise.all([loadQuizResponses(), loadQuizAnalytics()]); renderPage(); })();
@@ -5849,6 +5895,80 @@ document.addEventListener('click', async function(e){
   renderPage();
 });
 
+
+/* Add Trainer — Super Admin creates a Trainer account directly from
+   User Management → Trainers. POST /api/admin/trainers (superadmin.py).
+   The account is created approved immediately, but it is flagged for
+   first-login verification: the trainer sets their own password and
+   confirms it with an OTP on first login (see login.py). No email is
+   sent anywhere in this flow — the Super Admin has the credentials. */
+function openAddTrainerModal(){
+  const body = `
+    <p style="font-size:13px;color:var(--text-soft);margin-bottom:14px;">The trainer's account is created and approved immediately. On their first login they will set their own password and verify it with an OTP before reaching the dashboard.</p>
+    <div class="sa-field"><label>Full Name</label><input type="text" id="atName" placeholder="e.g. Priya Sharma"></div>
+    <div class="sa-field"><label>Email Address</label><input type="email" id="atEmail" placeholder="name@example.com"></div>
+    <div class="sa-field"><label>Mobile Number</label><input type="tel" id="atMobile" maxlength="10" placeholder="10-digit mobile number"></div>
+    <div class="sa-field"><label>Employee ID</label><input type="text" id="atEmpId" placeholder="e.g. TR-1024"></div>
+    <div class="sa-field"><label>Create Password</label><input type="password" id="atPassword" autocomplete="new-password"></div>
+    <div class="sa-field"><label>Confirm Password</label><input type="password" id="atConfirm" autocomplete="new-password"></div>
+    <p class="desc" style="margin:2px 0 10px;">Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character.</p>
+    <p id="atError" style="color:var(--rose-dark,#b91c1c);font-size:12.5px;display:none;margin-top:4px;"></p>`;
+  const foot = `<button class="btn btn-ghost" data-action="add-trainer-cancel">Cancel</button><button class="btn btn-ghost" data-action="toggle-trainer-pass" data-show="0">Show ${ic('eye','icon icon-sm')}</button><button class="btn btn-primary" data-action="create-trainer">Create Account</button>`;
+  openBigModal('Add Trainer', body, foot);
+}
+document.addEventListener('click', async function(e){
+  const el = e.target.closest('[data-action="create-trainer"]'); if(!el) return;
+  const errEl = document.getElementById('atError');
+  const showErr = msg => { if(errEl){ errEl.textContent = msg; errEl.style.display='block'; } };
+  if(errEl) errEl.style.display = 'none';
+  const fullName = (document.getElementById('atName').value||'').trim();
+  const email = (document.getElementById('atEmail').value||'').trim();
+  const mobile = (document.getElementById('atMobile').value||'').trim();
+  const employeeId = (document.getElementById('atEmpId').value||'').trim();
+  const password = document.getElementById('atPassword').value;
+  const confirmPassword = document.getElementById('atConfirm').value;
+  if(!fullName){ showErr('Full name is required.'); return; }
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ showErr('Enter a valid email address.'); return; }
+  if(!/^\d{10}$/.test(mobile)){ showErr('Mobile number must be exactly 10 digits.'); return; }
+  if(!employeeId){ showErr('Employee ID is required.'); return; }
+  if(!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/.test(password)){ showErr('Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character.'); return; }
+  if(password !== confirmPassword){ showErr('Passwords do not match.'); return; }
+  el.disabled = true;
+  const res = await platformApiPost('/admin/trainers', { fullName, email, mobile, employeeId, password, confirmPassword });
+  el.disabled = false;
+  if(!res.ok){ showErr(res.data.message || 'Could not create the trainer account.'); return; }
+  closeBigModal();
+  await loadUsersAdmin();
+  showAddTrainerSuccess({ fullName, email, employeeId, password });
+  renderPage();
+});
+
+/* Success alert — dismiss-ONLY via the explicit footer Close button.
+   openBigModal's noBackdropClose flag stops backdrop/outside/inside
+   clicks from closing it, and the ✕ close control is hidden so the
+   footer Close button is the one and only way out. */
+function showAddTrainerSuccess({ fullName, email, employeeId, password }){
+  const escT = s => esc(s).replace(/`/g,'&#96;').replace(/\$\{/g,'&#36;&#123;');
+  const body = `
+    <div style="text-align:center;padding:8px 0 4px;">
+      <div style="width:52px;height:52px;margin:0 auto 14px;border-radius:50%;background:rgba(31,158,147,0.14);color:var(--teal-dark);display:flex;align-items:center;justify-content:center;">${ic('check','icon icon-lg')}</div>
+      <h3 style="font-size:16px;margin-bottom:6px;">Trainer account created</h3>
+      <p style="font-size:13px;color:var(--text-soft);margin-bottom:16px;">The trainer can now log in. On their first login they will set their own password and verify it with an OTP before reaching the dashboard.</p>
+    </div>
+    <div style="border:1px solid var(--line);border-radius:8px;overflow:hidden;">
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <tr><td style="padding:9px 14px;border-bottom:1px solid var(--line);color:var(--text-soft);width:40%;">Full Name</td><td style="padding:9px 14px;border-bottom:1px solid var(--line);font-weight:600;">${escT(fullName)}</td></tr>
+        <tr><td style="padding:9px 14px;border-bottom:1px solid var(--line);color:var(--text-soft);">Email</td><td style="padding:9px 14px;border-bottom:1px solid var(--line);font-weight:600;font-family:var(--font-mono);font-size:12px;">${escT(email)}</td></tr>
+        <tr><td style="padding:9px 14px;border-bottom:1px solid var(--line);color:var(--text-soft);">Employee ID</td><td style="padding:9px 14px;border-bottom:1px solid var(--line);font-weight:600;font-family:var(--font-mono);font-size:12px;">${escT(employeeId)}</td></tr>
+        <tr><td style="padding:9px 14px;color:var(--text-soft);">Password</td><td style="padding:9px 14px;font-weight:600;font-family:var(--font-mono);font-size:12px;">${escT(password)}</td></tr>
+      </table>
+    </div>
+    <p class="desc" style="margin-top:12px;">Share these credentials with the trainer securely. This password lets them complete first-login verification.</p>`;
+  const foot = `<button class="btn btn-primary" data-action="close-big-modal">Close</button>`;
+  openBigModal('Trainer Created', body, foot, false, true);
+  const x = document.querySelector('#modal-root .sa-modal-close');
+  if(x) x.style.display = 'none';
+}
 
 /* Student Profile — Edit Profile modal (PUT /api/admin/students/:id).
    Edits the student's account-level contact details (name/email/mobile).
@@ -7013,8 +7133,8 @@ function renderReview(){
       <div class="review-item"><div class="ri-label">Questions Available</div><div class="ri-value">${isBank ? `${available} in Question Bank` : `${pool.length} / ${available}`}</div></div>
       <div class="review-item"><div class="ri-label">Questions to Display</div><div class="ri-value">${display}</div></div>
       <div class="review-item"><div class="ri-label">Duration</div><div class="ri-value">${d.duration} min</div></div>
-      <div class="review-item"><div class="ri-label">Start Date</div><div class="ri-value">${d.start ? new Date(d.start).toLocaleString() : '—'}</div></div>
-      <div class="review-item"><div class="ri-label">End Date</div><div class="ri-value">${d.end ? new Date(d.end).toLocaleString() : '—'}</div></div>
+      <div class="review-item"><div class="ri-label">Start Date</div><div class="ri-value">${d.start ? saFmtDateTime(d.start) : '—'}</div></div>
+      <div class="review-item"><div class="ri-label">End Date</div><div class="ri-value">${d.end ? saFmtDateTime(d.end) : '—'}</div></div>
     </div>
     <div class="section-title">Section Distribution</div>
     <div class="review-grid">${sectionRows || '<p style="color:var(--text-soft);font-size:13px;">No sections configured.</p>'}</div>
@@ -7357,8 +7477,8 @@ async function viewQuiz(id){
       <div class="review-item"><div class="ri-label">Questions Available</div><div class="ri-value">${q.questionsAvailable||0}</div></div>
       <div class="review-item"><div class="ri-label">Questions Displayed</div><div class="ri-value">${q.questionsDisplayed||0}</div></div>
       <div class="review-item"><div class="ri-label">Duration</div><div class="ri-value">${q.durationMinutes||0} min</div></div>
-      <div class="review-item"><div class="ri-label">Start</div><div class="ri-value">${q.startDateTime ? new Date(q.startDateTime).toLocaleString() : '—'}</div></div>
-      <div class="review-item"><div class="ri-label">End</div><div class="ri-value">${q.endDateTime ? new Date(q.endDateTime).toLocaleString() : '—'}</div></div>
+      <div class="review-item"><div class="ri-label">Start</div><div class="ri-value">${q.startDateTime ? saFmtDateTime(q.startDateTime) : '—'}</div></div>
+      <div class="review-item"><div class="ri-label">End</div><div class="ri-value">${q.endDateTime ? saFmtDateTime(q.endDateTime) : '—'}</div></div>
     </div>
     ${q.description ? `<p style="margin-bottom:16px;color:var(--text-soft);">${esc(q.description)}</p>` : ''}
     <div class="section-title">Questions (${(q.questions||[]).length})</div>

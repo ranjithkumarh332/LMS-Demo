@@ -97,6 +97,30 @@ PASSWORD_REGEX = re.compile(
 )
 
 
+def validate_password(password):
+    """Shared password rule — used by register / reset-password /
+    complete-first-login and the Super Admin's direct trainer creation."""
+    if not password or not PASSWORD_REGEX.match(password):
+        return (
+            "Password must be at least 8 characters and include an "
+            "uppercase letter, a lowercase letter, a number, and a "
+            "special character."
+        )
+    return None
+
+
+def validate_email(email):
+    if not email or not EMAIL_REGEX.match(email):
+        return "Enter a valid email address."
+    return None
+
+
+def validate_mobile(mobile):
+    if not mobile or not MOBILE_REGEX.match(mobile):
+        return "Mobile number must be exactly 10 digits."
+    return None
+
+
 def _now():
     return datetime.utcnow()
 
@@ -162,25 +186,6 @@ def init_auth(bcrypt, db, limiter, jwt, firebase_ready=False):
         if payload:
             body.update(payload)
         return jsonify(body), status
-
-    def validate_password(password):
-        if not password or not PASSWORD_REGEX.match(password):
-            return (
-                "Password must be at least 8 characters and include an "
-                "uppercase letter, a lowercase letter, a number, and a "
-                "special character."
-            )
-        return None
-
-    def validate_email(email):
-        if not email or not EMAIL_REGEX.match(email):
-            return "Enter a valid email address."
-        return None
-
-    def validate_mobile(mobile):
-        if not mobile or not MOBILE_REGEX.match(mobile):
-            return "Mobile number must be exactly 10 digits."
-        return None
 
     def find_user_by_email(email):
         return users.find_one({"email": email.strip().lower()})
@@ -269,7 +274,7 @@ def init_auth(bcrypt, db, limiter, jwt, firebase_ready=False):
         email = (data.get("email") or "").strip().lower()
         purpose = (data.get("purpose") or "register").strip().lower()
 
-        if purpose not in ("register", "forgot"):
+        if purpose not in ("register", "forgot", "first_login"):
             return error("Invalid OTP purpose.")
 
         email_err = validate_email(email)
@@ -279,7 +284,7 @@ def init_auth(bcrypt, db, limiter, jwt, firebase_ready=False):
         existing_user = find_user_by_email(email)
         if purpose == "register" and existing_user:
             return error("An account with this email already exists.")
-        if purpose == "forgot" and not existing_user:
+        if purpose in ("forgot", "first_login") and not existing_user:
             return error("No account found with this email.")
 
         # Upsert a fresh OTP record. In production this is where a real
@@ -577,6 +582,22 @@ def init_auth(bcrypt, db, limiter, jwt, firebase_ready=False):
         if status != "approved":
             return error("Your account is not active. Contact the administrator.", 403)
 
+        # Accounts created directly by the Super Admin (see
+        # POST /api/admin/trainers in superadmin.py) must complete a
+        # first-login verification before they get any usable session:
+        # they set a password of their own and confirm it with an OTP.
+        # NO token is issued here — login.html shows the verification
+        # panel and only then calls /complete-first-login.
+        if user.get("firstLoginVerify"):
+            return ok(
+                {
+                    "requiresFirstLoginVerification": True,
+                    "role": user["role"],
+                    "email": email,
+                },
+                message="Super Admin created this account. Set your password and verify to continue.",
+            )
+
         session_id = _start_new_session(user["role"], str(user["_id"]))
         token = issue_token_response(user["role"], str(user["_id"]), session_id)
         resp = ok(
@@ -689,6 +710,62 @@ def init_auth(bcrypt, db, limiter, jwt, firebase_ready=False):
             {"$set": {"passwordHash": password_hash, "updatedAt": _now()}},
         )
         return ok(message="Password updated successfully.")
+
+    # ==========================================================
+    # FIRST-LOGIN VERIFICATION — Super Admin-created accounts
+    # (trainers). login() refuses to issue a session for these until
+    # the user sets their own password AND proves it with an OTP.
+    # Only after that do they get a real token + session + redirect.
+    # ==========================================================
+    @auth_bp.route("/complete-first-login", methods=["POST"])
+    @limiter.limit("10 per minute")
+    def complete_first_login():
+        data = request.get_json(silent=True) or {}
+        email = (data.get("email") or "").strip().lower()
+        new_password = data.get("newPassword") or ""
+        confirm_password = data.get("confirmPassword") or ""
+        otp_token = data.get("otpToken") or ""
+
+        user = find_user_by_email(email)
+        if not user:
+            return error("No account found with this email.", 404)
+        if not user.get("firstLoginVerify"):
+            return error("This account does not require first-login verification.", 400)
+
+        password_err = validate_password(new_password)
+        if password_err:
+            return error(password_err)
+        if new_password != confirm_password:
+            return error("Passwords do not match.")
+
+        otp_err = _consume_otp_token(email, "first_login", otp_token)
+        if otp_err:
+            return error(otp_err)
+
+        password_hash = bcrypt.generate_password_hash(new_password).decode("utf-8")
+        users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {
+                "passwordHash": password_hash,
+                "firstLoginVerify": False,
+                "firstLoginVerifiedAt": _now(),
+                "updatedAt": _now(),
+            }},
+        )
+
+        session_id = _start_new_session(user["role"], str(user["_id"]))
+        token = issue_token_response(user["role"], str(user["_id"]), session_id)
+        resp = ok(
+            {
+                "token": token,
+                "role": user["role"],
+                "redirect": ROLE_REDIRECTS.get(user["role"], "login.html"),
+                "user": public_user(user),
+            },
+            message="Verification complete. Welcome to the platform!",
+        )
+        set_access_cookies(resp[0], token)
+        return resp
 
     # ==========================================================
     # GOOGLE LOGIN (Firebase Authentication — Google Sign-In)

@@ -316,8 +316,8 @@ app.register_blueprint(init_assessments(db=db), url_prefix="/api/assessments")
 # 6. STATIC FRONTEND — serves the untouched HTML/CSS/JS as-is
 # ------------------------------------------------------------
 @app.route("/")
-def serve_login_page():
-    return send_from_directory(FRONTEND_DIR, "login.html")
+def serve_home_page():
+    return send_from_directory(FRONTEND_DIR, "Home.html")
 
 
 @app.route("/<path:filename>")
