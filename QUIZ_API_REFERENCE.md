@@ -73,6 +73,7 @@ Same assessment + cohort + chart shape as Super Admin, plus:
 
 | Method & Path | Purpose |
 |---|---|
+| `GET /dashboard/insights` | Dashboard widgets computed live from `assessment_attempts` + `workshop_sessions`: `readinessTrend` (weekly avg), `departmentRanking` (top 5, best-per-student avg), `skillRadar` (cohort axes), `improvementRing` (avg consecutive-assessment delta), `upcomingSessions` (this trainer's assigned, not-yet-started sessions). |
 | `POST /manual-interview/<studentId>/schedule` | Step 1: schedule/reschedule an interview. |
 | `POST /manual-interview/<interviewId>/score` | Step 2: record score 0–100 → feeds cohort generation. |
 

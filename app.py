@@ -282,7 +282,7 @@ app.register_blueprint(auth_bp, url_prefix="/api/auth")
 # all three share quiz_common.py so cohort/placement-rule logic can
 # never drift out of sync between dashboards.
 app.register_blueprint(init_superadmin(db=db, bcrypt=bcrypt), url_prefix="/api/admin")
-app.register_blueprint(init_trainer(db=db), url_prefix="/api/trainer")
+app.register_blueprint(init_trainer(db=db, bcrypt=bcrypt), url_prefix="/api/trainer")
 app.register_blueprint(init_student(db=db), url_prefix="/api/student")
 
 # Create Quiz feature — dedicated `quizzes` collection, mounted once per

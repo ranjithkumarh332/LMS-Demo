@@ -1559,7 +1559,10 @@ def log_activity(db, actor_id, actor_role, action, description, college=None, st
 
 
 def get_recent_activity(db, query=None, limit=20):
-    """Returns newest-first activity rows, serialized for direct JSON use."""
+    """Returns newest-first activity rows, serialized for direct JSON use.
+    createdAtIST is the same timestamp rendered in Asia/Kolkata with a
+    24-hour clock (fmt_ist) — the frontend only ever displays this field,
+    never doing its own timezone arithmetic."""
     cursor = db.activity_log.find(query or {}).sort("createdAt", -1).limit(limit)
     rows = []
     for d in cursor:
@@ -1570,5 +1573,6 @@ def get_recent_activity(db, query=None, limit=20):
             "actorRole": d.get("actorRole"),
             "meta": d.get("meta", {}),
             "createdAt": d["createdAt"].isoformat() if d.get("createdAt") else None,
+            "createdAtIST": fmt_ist(d.get("createdAt"), "%d %b %Y %H:%M"),
         })
     return rows

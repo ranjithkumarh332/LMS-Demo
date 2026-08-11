@@ -339,6 +339,19 @@ tbody tr:hover{ background:var(--paper); }
 .search-mini{ position:relative; flex:1; min-width:180px; }
 .search-mini input{ width:100%; padding-left:32px; }
 .search-mini .s-ic{ position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:12px; color:var(--text-soft); }
+/* ---- Checkbox dropdown + Export dropdown (All Students filter bar) ---- */
+.cb-dropdown, .dd-export{ position:relative; }
+.cb-dd-toggle{ padding:9px 12px; border:1.5px solid var(--line); border-radius:var(--radius-sm); font-size:13px; background:var(--paper); color:var(--text); cursor:pointer; font-family:var(--font-body); white-space:nowrap; }
+.cb-dd-toggle:hover{ border-color:var(--ink-soft); }
+.cb-dd-panel, .dd-export-menu{ position:absolute; top:calc(100% + 6px); left:0; min-width:230px; max-height:290px; overflow-y:auto; background:var(--paper-raised); border:1px solid var(--line); border-radius:var(--radius-md); box-shadow:var(--shadow-md); padding:8px; z-index:40; display:none; }
+.cb-dropdown.open .cb-dd-panel, .dd-export.open .dd-export-menu{ display:block; }
+.cb-dd-panel label{ display:flex; align-items:center; gap:8px; padding:7px 9px; border-radius:var(--radius-sm); font-size:13px; color:var(--text); cursor:pointer; }
+.cb-dd-panel label:hover{ background:var(--paper); }
+.cb-dd-panel .cb-dd-all{ border-bottom:1px solid var(--line); border-radius:0; margin-bottom:4px; padding-bottom:9px; font-weight:600; }
+.cb-dd-panel input[type="checkbox"]{ accent-color:var(--teal-dark); }
+.dd-export-menu{ right:0; left:auto; min-width:150px; }
+.dd-export-menu button{ display:block; width:100%; text-align:left; padding:9px 10px; border:none; background:none; font-size:13px; color:var(--text); border-radius:var(--radius-sm); cursor:pointer; font-family:var(--font-body); }
+.dd-export-menu button:hover{ background:var(--paper); }
 .bulk-bar{ display:none; align-items:center; gap:12px; padding:12px 16px; background:var(--ink); color:var(--paper); border-radius:var(--radius-md); margin-bottom:14px; position:sticky; top:140px; z-index:19; }
 .bulk-bar.show{ display:flex; animation: view-in 0.3s ease; }
 .bulk-bar .count{ font-weight:700; font-family:var(--font-mono); }
@@ -485,6 +498,7 @@ tbody tr:hover{ background:var(--paper); }
 .rank-row:nth-child(1) .rank-num{ background:linear-gradient(135deg,var(--amber),var(--amber-dark)); color:#1B1300; border-color:transparent; }
 .rank-info{ flex:1; min-width:0; }
 .rank-info .r-name{ font-size:13px; font-weight:600; margin-bottom:6px; }
+.rank-info .r-college{ display:block; font-size:10.5px; font-weight:400; color:var(--text-soft); margin-bottom:6px; }
 .rank-val{ font-family:var(--font-mono); font-size:12.5px; font-weight:700; color:var(--teal-dark); width:38px; text-align:right; flex-shrink:0; }
 [data-theme="dark"] .rank-val{ color:var(--teal); }
 
@@ -570,6 +584,12 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
 @keyframes bs-pop{ from{ transform:scale(0.5); opacity:0; } to{ transform:scale(1); opacity:1; } }
 .bulk-success h3{ font-size:19px; margin-bottom:6px; }
 .bulk-success p{ color:var(--text-soft); font-size:13.5px; max-width:420px; margin:0 auto; }
+
+.rejected-head{ font-size:13px; font-weight:700; margin-bottom:8px; }
+.rejected-row{ display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--line); border-radius:var(--radius-sm); margin-bottom:6px; font-size:12.5px; }
+.rejected-row .rr-idx{ font-size:11px; color:var(--text-soft); min-width:34px; }
+.rejected-row .rr-name{ font-weight:600; min-width:140px; }
+.rejected-row .rr-reason{ color:var(--rose); font-size:12px; }
 
 .toast.toast-error .t-ic{ background:var(--rose); }
 .toast .t-retry{ margin-left:auto; font-size:12px; font-weight:700; text-decoration:underline; flex-shrink:0; cursor:pointer; }
@@ -833,7 +853,7 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
         <div class="dash-row-3b">
           <div class="card card-pad dash-radar">
             <h3 style="font-size:15px;margin-bottom:6px;">Skill Radar</h3>
-            <p style="color:var(--text-soft);font-size:12px;margin-bottom:10px;">Cohort average across core competencies</p>
+            <p style="color:var(--text-soft);font-size:12px;margin-bottom:10px;">Average score by cohort — Entry Level, A, B, C</p>
             <svg viewBox="0 0 300 280">
               <g fill="none" stroke="var(--line)" stroke-width="1">
                 <circle cx="150" cy="150" r="27.5"/><circle cx="150" cy="150" r="55"/><circle cx="150" cy="150" r="82.5"/><circle cx="150" cy="150" r="110"/>
@@ -904,19 +924,42 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
           <div class="page-hero-text"><h3>Student Directory</h3><p id="studentsHeroSummary">Loading student directory…</p></div>
         </div>
         <div class="filter-bar">
-          <div class="search-mini"><span class="s-ic">⚲</span><input type="text" placeholder="Search by name or roll number…"></div>
-          <select><option>All Departments</option><option>CSE</option><option>ECE</option><option>Mechanical</option><option>Civil</option><option>IT</option></select>
-          <select><option>All Cohorts</option><option>Cohort A — High Readiness</option><option>Cohort B — Developing</option><option>Cohort C — Needs Support</option></select>
-          <select><option>All Students</option><option>Assigned to Me</option></select>
+          <div class="search-mini"><span class="s-ic">⚲</span><input type="text" id="stuSearch" placeholder="Search by name, roll number or email…"></div>
+          <div class="cb-dropdown" id="stuCollegeDd">
+            <button type="button" class="cb-dd-toggle" id="stuCollegeToggle">All Colleges ▾</button>
+            <div class="cb-dd-panel">
+              <label class="cb-dd-all"><input type="checkbox" id="stuCollegeAll" checked> Select All</label>
+              <div id="stuCollegeOptions"></div>
+            </div>
+          </div>
+          <select id="stuDept"><option value="">All Departments</option></select>
+          <div class="cb-dropdown" id="stuCohortDd">
+            <button type="button" class="cb-dd-toggle" id="stuCohortToggle">All Cohorts ▾</button>
+            <div class="cb-dd-panel">
+              <label class="cb-dd-all"><input type="checkbox" id="stuCohortAll" checked> Select All</label>
+              <div id="stuCohortOptions">
+                <label><input type="checkbox" value="entry_level" checked> Entry Level</label>
+                <label><input type="checkbox" value="A" checked> Cohort A</label>
+                <label><input type="checkbox" value="B" checked> Cohort B</label>
+                <label><input type="checkbox" value="C" checked> Cohort C</label>
+              </div>
+            </div>
+          </div>
           <div style="display:flex;gap:8px;margin-left:auto;">
-            <button class="btn btn-ghost btn-sm" onclick="showToast('Add Student form — coming soon','＋')">＋ Add Student</button>
+            <button class="btn btn-ghost btn-sm" onclick="openAddStudentModal()">＋ Add Student</button>
             <button class="btn btn-accent btn-sm" onclick="openBulkUploadModal()">⇧ Bulk Upload</button>
-            <button class="btn btn-ghost btn-sm">Export</button>
+            <div class="dd-export" id="stuExportDd">
+              <button class="btn btn-ghost btn-sm" onclick="toggleExportMenu(event)">⇩ Export ▾</button>
+              <div class="dd-export-menu" id="stuExportMenu">
+                <button onclick="exportStudents('xlsx')">Excel (.xlsx)</button>
+                <button onclick="exportStudents('pdf')">PDF</button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="table-wrap card">
           <table>
-            <thead><tr><th>Student</th><th>Roll No.</th><th>Department</th><th>Cohort</th><th>Attendance</th><th>Avg Score</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Student</th><th>Roll No.</th><th>College</th><th>Department</th><th>Cohort</th><th>Attendance</th><th>Avg Score</th><th>Status</th><th></th></tr></thead>
             <tbody id="studentsTbody"></tbody>
           </table>
         </div>
@@ -1545,6 +1588,57 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
   </div>
 </div>
 
+<!-- ============================================================ ADD STUDENT MODAL ============================================================ -->
+<div class="modal-overlay" id="addStudentModal">
+  <div class="modal">
+    <div class="modal-head"><h3>Add Student</h3><button class="modal-close" onclick="closeAddStudentModal()">✕</button></div>
+    <div class="modal-body">
+      <p style="color:var(--text-soft);font-size:13px;margin-bottom:16px;">The student gets immediate access — no approval wait. They must set their own password at first login. Leave the password blank to auto-generate a one-time temporary password, or set one now.</p>
+      <div class="field"><input type="text" placeholder=" " id="asFullName" autocomplete="off"><label>Full Name</label></div>
+      <div class="row-2">
+        <div class="field"><input type="email" placeholder=" " id="asEmail" autocomplete="off"><label>Email</label></div>
+        <div class="field"><input type="tel" placeholder=" " id="asMobile" maxlength="10" autocomplete="off"><label>Mobile (10 digits)</label></div>
+      </div>
+      <div class="row-2">
+        <div class="field"><input type="text" placeholder=" " id="asRoll" autocomplete="off"><label>Roll Number</label></div>
+        <div class="field select-field"><label>College</label><select id="asCollege"><option value="">Loading colleges…</option></select></div>
+      </div>
+      <div class="field select-field"><label>Department</label><select id="asDepartment"><option value="">Select a college first</option></select></div>
+      <div class="row-2">
+        <div class="field"><input type="text" placeholder=" " id="asPassword" autocomplete="off" style="padding-right:96px;"><label>Password (optional)</label><button type="button" class="btn btn-ghost btn-sm" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);z-index:2;padding:4px 10px;font-size:11px;" onclick="generateStudentPassword()">Generate</button></div>
+        <div class="field"><input type="password" placeholder=" " id="asConfirmPassword" autocomplete="off"><label>Confirm Password</label></div>
+      </div>
+      <p id="asError" style="color:var(--rose,#e11d48);font-size:13px;display:none;margin-top:6px;"></p>
+    </div>
+    <div class="modal-foot" style="justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeAddStudentModal()">Cancel</button>
+      <button class="btn btn-primary" id="asSubmitBtn" onclick="submitAddStudent()">Create Student</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ STUDENT CREATED (ONE-TIME PASSWORD) MODAL ============================================================ -->
+<div class="modal-overlay" id="studentCreatedModal">
+  <div class="modal">
+    <div class="modal-head"><h3>Student Created</h3><button class="modal-close" onclick="closeModal('studentCreatedModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="bulk-success">
+        <div class="bs-ic">✓</div>
+        <h3 id="scName">—</h3>
+        <p id="scIntro">Share this one-time temporary password with the student. They must change it at their first login.</p>
+      </div>
+      <div id="scPasswordRow" style="display:none;align-items:center;gap:10px;background:var(--paper);border:1px dashed var(--line);border-radius:var(--radius-sm);padding:12px 14px;margin-top:16px;">
+        <code id="scPassword" style="flex:1;font-size:16px;letter-spacing:1px;"></code>
+        <button class="btn btn-ghost btn-sm" onclick="copyStudentPassword()">Copy</button>
+      </div>
+      <div id="scPasswordSetNote" style="display:none;margin-top:16px;font-size:13px;color:var(--text-soft);background:var(--paper);border:1px dashed var(--line);border-radius:var(--radius-sm);padding:12px 14px;">The student will be prompted to set a new password at their first login.</div>
+    </div>
+    <div class="modal-foot" style="justify-content:flex-end;">
+      <button class="btn btn-primary" onclick="closeModal('studentCreatedModal')">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============================================================ BULK UPLOAD STUDENTS MODAL ============================================================ -->
 <div class="modal-overlay" id="bulkUploadModal">
   <div class="modal modal-lg">
@@ -1582,7 +1676,7 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
         <div class="val-summary" id="bulkValSummary"></div>
         <div class="table-wrap" style="max-height:320px;overflow-y:auto;">
           <table>
-            <thead><tr><th>Student Name</th><th>Roll No.</th><th>Department</th><th>Year</th><th>Section</th><th>Status</th><th>Validation</th></tr></thead>
+            <thead><tr><th>Student Name</th><th>Roll No.</th><th>College</th><th>Department</th><th>Year</th><th>Section</th><th>Status</th><th>Validation</th></tr></thead>
             <tbody id="bulkPreviewTbody"></tbody>
           </table>
         </div>
@@ -1593,7 +1687,11 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
         <div class="bulk-success">
           <div class="bs-ic">✓</div>
           <h3 id="bulkSuccessTitle">Students successfully imported</h3>
-          <p>They now appear in your student roster and are ready for attendance & assessments.</p>
+          <p id="bulkSuccessText">They now appear in your student roster and are ready for attendance & assessments.</p>
+        </div>
+        <div id="bulkRejectedWrap" style="display:none;margin-top:16px;">
+          <div class="rejected-head">Some rows could not be imported</div>
+          <div id="bulkRejectedList"></div>
         </div>
       </div>
     </div>
@@ -1626,20 +1724,35 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
 const depts = ['CSE','ECE','Mechanical','Civil','IT'];
 const cohorts = ['Cohort A','Cohort B','Cohort C'];
 function initials(n){ return (n||'').split(' ').filter(Boolean).map(w=>w[0]).join('').toUpperCase() || '—'; }
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 /* Cohort placement (Cohort A/B/C) is computed authoritatively by the backend
    from the combined quiz + manual interview score. No client-side cohort
    math is duplicated here. */
 
 /* ============================================================ STUDENT ROSTER (live from backend) ============================================================
-   Populated from GET /api/trainer/cohorts/students. No demo/mock students
-   are generated client-side. Every consumer (Students table, Attendance, Participation,
-   the dashboard hero count) reads from this single array. */
+   Populated from GET /api/trainer/students (all students, platform-wide —
+   there is no trainer↔student binding). No demo/mock students are
+   generated client-side. Every consumer (Students table, Attendance,
+   Participation, the dashboard hero count) reads from this single array. */
 let students = [];
 let studentsLoaded = false;
+let collegeOptions = [];        // [{id, name, departments}] from GET /students/departments
+let studentCollegeOptions = []; // [{id, name}] — college names used by the roster filter
+let stuSearchTimer = null;
 
 async function loadStudents(){
-  const res = await trainerApi('/cohorts/students');
+  const params = new URLSearchParams();
+  const search = (document.getElementById('stuSearch')?.value || '').trim();
+  if(search) params.set('search', search);
+  const colleges = getStuCollegeFilter();
+  if(colleges.length && colleges.length < studentCollegeOptions.length) params.set('college', colleges.join(','));
+  const dept = document.getElementById('stuDept')?.value;
+  if(dept) params.set('department', dept);
+  const cohortsSel = getStuCohortFilter();
+  if(cohortsSel.length && cohortsSel.length < 4) params.set('cohort', cohortsSel.join(','));
+  const qs = params.toString();
+  const res = await trainerApi('/students' + (qs ? '?' + qs : ''));
   if(!res.ok){
     students = [];
     studentsLoaded = false;
@@ -1647,10 +1760,13 @@ async function loadStudents(){
     return;
   }
   students = (res.data.students || []).map((s, i) => ({
-    id: s._id || i + 1,
+    id: s.id || s._id || i + 1,
     name: s.fullName || '—',
     dept: s.department || '—',
     roll: s.rollNumber || '—',
+    email: s.email || '',
+    mobile: s.mobile || '',
+    college: s.college || '—',
     cohort: s.cohort ? 'Cohort ' + s.cohort : 'Entry Level',
     attendance: s.attendancePct != null ? s.attendancePct : null,
     score: s.quizScore != null ? s.quizScore : null,
@@ -1661,6 +1777,95 @@ async function loadStudents(){
   studentsLoaded = true;
   renderStudents(); renderAttendance(); renderParticipation(); renderStudentsHero();
 }
+
+/* ---- All Students filter bar: college/cohort checkbox dropdowns, dept select, search ---- */
+function getStuCollegeFilter(){
+  return [...document.querySelectorAll('#stuCollegeOptions input:checked')].map(c => c.value);
+}
+function getStuCohortFilter(){
+  return [...document.querySelectorAll('#stuCohortOptions input:checked')].map(c => c.value);
+}
+function updateStuFilterToggles(){
+  const colleges = getStuCollegeFilter();
+  const allCol = document.getElementById('stuCollegeAll');
+  if(allCol) allCol.checked = studentCollegeOptions.length > 0 && colleges.length === studentCollegeOptions.length;
+  const colToggle = document.getElementById('stuCollegeToggle');
+  if(colToggle) colToggle.textContent = colleges.length === studentCollegeOptions.length ? 'All Colleges ▾' : `${colleges.length} College${colleges.length===1?'':'s'} ▾`;
+  const cohortsSel = getStuCohortFilter();
+  const allCoh = document.getElementById('stuCohortAll');
+  if(allCoh) allCoh.checked = cohortsSel.length === 4;
+  const cohToggle = document.getElementById('stuCohortToggle');
+  if(cohToggle) cohToggle.textContent = cohortsSel.length === 4 ? 'All Cohorts ▾' : `${cohortsSel.length} Cohort${cohortsSel.length===1?'':'s'} ▾`;
+}
+function toggleDropdown(id){
+  const dd = document.getElementById(id);
+  if(!dd) return;
+  const wasOpen = dd.classList.contains('open');
+  document.querySelectorAll('.cb-dropdown.open, .dd-export.open').forEach(x => x.classList.remove('open'));
+  if(!wasOpen) dd.classList.add('open');
+}
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('.cb-dropdown') && !e.target.closest('.dd-export')){
+    document.querySelectorAll('.cb-dropdown.open, .dd-export.open').forEach(x => x.classList.remove('open'));
+  }
+});
+function toggleExportMenu(e){
+  if(e) e.stopPropagation();
+  toggleDropdown('stuExportDd');
+}
+function exportStudents(format){
+  const params = new URLSearchParams();
+  const search = (document.getElementById('stuSearch')?.value || '').trim();
+  if(search) params.set('search', search);
+  const colleges = getStuCollegeFilter();
+  if(colleges.length && colleges.length < studentCollegeOptions.length) params.set('college', colleges.join(','));
+  const dept = document.getElementById('stuDept')?.value;
+  if(dept) params.set('department', dept);
+  const cohortsSel = getStuCohortFilter();
+  if(cohortsSel.length && cohortsSel.length < 4) params.set('cohort', cohortsSel.join(','));
+  params.set('format', format);
+  window.location.href = '/api/trainer/students/export?' + params.toString();
+}
+
+async function loadStudentFilterOptions(){
+  const res = await trainerApi('/students/departments');
+  if(!res.ok || !Array.isArray(res.data.colleges)) return;
+  collegeOptions = res.data.colleges;
+  studentCollegeOptions = res.data.colleges.map(c => ({ id: c.id, name: c.name }));
+  const colOpts = document.getElementById('stuCollegeOptions');
+  colOpts.innerHTML = studentCollegeOptions.map(c =>
+    `<label><input type="checkbox" value="${esc(c.name)}" checked> ${esc(c.name)}</label>`).join('');
+  const seen = new Set();
+  const deptNames = [];
+  res.data.colleges.forEach(c => (c.departments || []).forEach(d => {
+    if(!seen.has(d.department_name)){ seen.add(d.department_name); deptNames.push(d.department_name); }
+  }));
+  deptNames.sort();
+  const deptSel = document.getElementById('stuDept');
+  deptSel.innerHTML = '<option value="">All Departments</option>' +
+    deptNames.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  document.getElementById('stuCollegeAll').checked = true;
+  updateStuFilterToggles();
+}
+
+/* ---- All Students filter wiring ---- */
+document.getElementById('stuCollegeToggle').addEventListener('click', (e)=>{ e.stopPropagation(); toggleDropdown('stuCollegeDd'); });
+document.getElementById('stuCohortToggle').addEventListener('click', (e)=>{ e.stopPropagation(); toggleDropdown('stuCohortDd'); });
+document.getElementById('stuCollegeOptions').addEventListener('change', ()=>{ updateStuFilterToggles(); loadStudents(); });
+document.getElementById('stuCohortOptions').addEventListener('change', ()=>{ updateStuFilterToggles(); loadStudents(); });
+document.getElementById('stuCollegeAll').addEventListener('change', function(){
+  document.querySelectorAll('#stuCollegeOptions input').forEach(c => c.checked = this.checked);
+  updateStuFilterToggles(); loadStudents();
+});
+document.getElementById('stuCohortAll').addEventListener('change', function(){
+  document.querySelectorAll('#stuCohortOptions input').forEach(c => c.checked = this.checked);
+  updateStuFilterToggles(); loadStudents();
+});
+document.getElementById('stuDept').addEventListener('change', loadStudents);
+document.getElementById('stuSearch').addEventListener('input', ()=>{
+  clearTimeout(stuSearchTimer);
+  stuSearchTimer = setTimeout(loadStudents, 350);
+});
 
 function renderStudentsHero(){
   const el = document.getElementById('studentsHeroSummary');
@@ -1723,6 +1928,7 @@ const adminApi = (path, opts) => apiCall(ADMIN_API_BASE, path, opts);
 const PUBLIC_API_BASE = '/api/public';
 const publicApi = (path, opts) => apiCall(PUBLIC_API_BASE, path, opts);
 loadStudents();
+loadStudentFilterOptions();
 
 function cohortTargetLabel(target){
   return { A:'Cohort A', B:'Cohort B', C:'Cohort C', all:'All Cohorts', entry_level:'Entry Level' }[target] || target || '—';
@@ -1966,15 +2172,128 @@ function renderStudents(){
   if(!tbody) return;
   tbody.innerHTML = students.length ? students.map(s=>`
     <tr>
-      <td><div class="row-person"><div class="row-avatar">${initials(s.name)}</div><div><div class="row-name">${s.name}</div><div class="row-sub">${s.cohort}</div></div></div></td>
+      <td><div class="row-person"><div class="row-avatar">${initials(s.name)}</div><div><div class="row-name">${s.name}</div><div class="row-sub">${s.email || s.cohort}</div></div></div></td>
       <td>${s.roll}</td>
+      <td>${s.college}</td>
       <td>${s.dept}</td>
       <td>${s.cohort}</td>
       <td>${s.attendance != null ? s.attendance + '%' : '—'}</td>
       <td>${s.score != null ? s.score : '—'}</td>
       <td><span class="badge ${s.status==='Active'?'badge-published':'badge-expired'}">${s.status}</span></td>
       <td class="td-actions"><button class="btn-icon" title="View profile">▤</button></td>
-    </tr>`).join('') : `<tr><td colspan="8"><div class="empty-state"><div class="e-ic">◍</div>No students found.</div></td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="9"><div class="empty-state"><div class="e-ic">◍</div>No students found.</div></td></tr>`;
+}
+
+/* ============================================================ ADD STUDENT (single, live) ============================================================
+   Creates a student via POST /api/trainer/students. The trainer picks the
+   college from the live dropdown (GET /students/departments) and the
+   department reloads to that college's departments. Password is optional —
+   leave blank for a one-time temporary password (shown once in the created
+   modal) or set one now; either way the student must set a new password at
+   first login (firstLoginVerify). */
+let addStudentCollegeLoaded = false;
+
+function asCollegeId(){
+  const el = document.getElementById('asCollege');
+  return el && el.options[el.selectedIndex] ? el.options[el.selectedIndex].value : '';
+}
+function fillAsDepartments(){
+  const collegeSel = document.getElementById('asCollege');
+  const deptSel = document.getElementById('asDepartment');
+  const cid = collegeSel?.value;
+  const depts = collegeOptions.find(c => c.id === cid)?.departments || [];
+  deptSel.innerHTML = depts.length
+    ? '<option value="">Select department…</option>' + depts.map(d => `<option value="${d._id}">${d.department_name}</option>`).join('')
+    : '<option value="">No departments in this college</option>';
+}
+function generateStudentPassword(){
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let pwd = '';
+  for(let i=0;i<10;i++) pwd += alphabet[Math.floor(Math.random()*alphabet.length)];
+  const el = document.getElementById('asPassword');
+  if(el) el.value = pwd;
+  const confirmEl = document.getElementById('asConfirmPassword');
+  if(confirmEl) confirmEl.value = pwd;
+  showToast('Temporary password generated', '🔑');
+}
+
+async function openAddStudentModal(){
+  ['asFullName','asEmail','asMobile','asRoll','asPassword','asConfirmPassword'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  addStudentError('');
+  const btn = document.getElementById('asSubmitBtn'); if(btn) btn.disabled = false;
+  const collegeSel = document.getElementById('asCollege');
+  const deptSel = document.getElementById('asDepartment');
+  collegeSel.innerHTML = '<option value="">Loading colleges…</option>';
+  deptSel.innerHTML = '<option value="">Select a college first</option>';
+  openModal('addStudentModal');
+  const nameEl = document.getElementById('asFullName'); if(nameEl) nameEl.focus();
+  if(!addStudentCollegeLoaded){
+    const res = await trainerApi('/students/departments');
+    if(!res.ok){ collegeSel.innerHTML = '<option value="">Could not load colleges</option>'; return; }
+    collegeOptions = res.data.colleges || [];
+    studentCollegeOptions = collegeOptions.map(c => ({ id: c.id, name: c.name }));
+    addStudentCollegeLoaded = true;
+  }
+  collegeSel.innerHTML = collegeOptions.length
+    ? '<option value="">Select college…</option>' + collegeOptions.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')
+    : '<option value="">No colleges available</option>';
+  if(collegeOptions.length === 1){
+    collegeSel.value = collegeOptions[0].id;
+    fillAsDepartments();
+  }
+}
+function closeAddStudentModal(){ closeModal('addStudentModal'); }
+function addStudentError(msg){
+  const errEl = document.getElementById('asError');
+  if(errEl){ errEl.textContent = msg; errEl.style.display = msg ? 'block' : 'none'; }
+}
+document.getElementById('asCollege').addEventListener('change', fillAsDepartments);
+
+async function submitAddStudent(){
+  const fullName = document.getElementById('asFullName').value.trim();
+  const email = document.getElementById('asEmail').value.trim();
+  const mobile = document.getElementById('asMobile').value.trim();
+  const roll = document.getElementById('asRoll').value.trim();
+  const collegeId = asCollegeId();
+  const departmentId = document.getElementById('asDepartment').value;
+  const password = document.getElementById('asPassword').value;
+  const confirmPassword = document.getElementById('asConfirmPassword').value;
+
+  if(!fullName) return addStudentError('Full name is required.');
+  if(!/^\S+@\S+\.\S+$/.test(email)) return addStudentError('Enter a valid email address.');
+  if(!/^\d{10}$/.test(mobile)) return addStudentError('Mobile number must be exactly 10 digits.');
+  if(!roll) return addStudentError('Roll number is required.');
+  if(!collegeId) return addStudentError('Select a college.');
+  if(!departmentId) return addStudentError('Select a department.');
+  if(password && password.length < 6) return addStudentError('Password must be at least 6 characters.');
+  if(password && password !== confirmPassword) return addStudentError('Passwords do not match.');
+
+  const btn = document.getElementById('asSubmitBtn'); if(btn) btn.disabled = true;
+  addStudentError('');
+  const res = await trainerApi('/students', { method:'POST', body:{ fullName, email, mobile, rollNumber:roll, collegeId, departmentId, password: password || undefined, confirmPassword: confirmPassword || undefined } });
+  if(!res.ok){
+    if(btn) btn.disabled = false;
+    addStudentError(res.data.message || 'Could not create the student.');
+    return;
+  }
+  closeAddStudentModal();
+  const s = res.data.student || {};
+  const tempPwd = res.data.temporaryPassword;
+  document.getElementById('scName').textContent = s.name || fullName;
+  document.getElementById('scPasswordRow').style.display = tempPwd ? 'flex' : 'none';
+  document.getElementById('scPasswordSetNote').style.display = tempPwd ? 'none' : 'block';
+  document.getElementById('scIntro').textContent = tempPwd
+    ? 'Share this one-time temporary password with the student. They must change it at their first login.'
+    : 'The student will be prompted to set a new password at their first login.';
+  document.getElementById('scPassword').textContent = tempPwd || '';
+  openModal('studentCreatedModal');
+  await loadStudents();
+}
+
+function copyStudentPassword(){
+  const pwd = document.getElementById('scPassword').textContent || '';
+  if(navigator.clipboard){ navigator.clipboard.writeText(pwd).then(()=> showToast('Password copied','✓')).catch(()=> showToast('Password: ' + pwd, '🔑')); }
+  else showToast('Password: ' + pwd, '🔑');
 }
 
 /* ============================================================ BULK UPLOAD STUDENTS ============================================================ */
@@ -1992,6 +2311,8 @@ function openBulkUploadModal(){
   document.getElementById('bulkFileChipWrap').innerHTML = '';
   document.getElementById('bulkProgressWrap').style.display = 'none';
   document.getElementById('bulkProgressFill').style.width = '0%';
+  document.getElementById('bulkRejectedWrap').style.display = 'none';
+  document.getElementById('bulkRejectedList').innerHTML = '';
   updateBulkStepperUI();
   openModal('bulkUploadModal');
 }
@@ -2046,8 +2367,8 @@ function bulkSimulateUpload(){
 }
 
 function downloadSampleTemplate(){
-  const headers = ['Student Name','Roll Number','Register Number','Email','Phone','Department','Year','Section','Batch','Gender'];
-  const sample = ['Full Name','DEPT-YYNNN','REGYYYYNNNNN','name@example.edu','9XXXXXXXXX','CSE','1-4','A-C','YYYY','Male/Female/Other'];
+  const headers = ['Student Name','Roll Number','Register Number','Email','Phone','College','Department','Year','Section','Batch','Gender'];
+  const sample = ['Full Name','DEPT-YYNNN','REGYYYYNNNNN','name@example.edu','9XXXXXXXXX','KPRIET','CSE','1-4','A-C','YYYY','Male/Female/Other'];
   const csv = headers.join(',')+'\n'+sample.join(',')+'\n';
   const blob = new Blob([csv], {type:'text/csv'});
   const url = URL.createObjectURL(blob);
@@ -2078,6 +2399,7 @@ function parseCsvText(text){
       roll: col(row,'roll number') || col(row,'roll'),
       email: col(row,'email'),
       phone: col(row,'phone'),
+      college: col(row,'college'),
     };
   });
 }
@@ -2087,8 +2409,23 @@ async function extractBulkRows(file){
     const text = await file.text();
     return parseCsvText(text);
   }
-  // TODO: wire in a real XLSX parser (e.g. SheetJS) here before enabling XLSX uploads.
-  showToast('XLSX parsing requires the spreadsheet parser to be connected — please use CSV for now.', '⚠');
+  if(/\.xlsx$/i.test(file.name)){
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data, { type:'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(ws, { defval:'' });
+    return json.map(r => ({
+      name: String(r['Student Name'] || r['Name'] || '').trim(),
+      dept: String(r['Department'] || '').trim(),
+      year: String(r['Year'] || '').trim(),
+      section: String(r['Section'] || '').trim(),
+      roll: String(r['Roll Number'] || r['Roll'] || '').trim(),
+      email: String(r['Email'] || '').trim(),
+      phone: String(r['Phone'] || '').trim(),
+      college: String(r['College'] || '').trim(),
+    }));
+  }
+  showToast('Unsupported file type — please upload CSV or XLSX.', '⚠');
   return [];
 }
 
@@ -2097,6 +2434,7 @@ function validateBulkRows(rows){
     const issues = [];
     if(!r.name) issues.push('Missing name');
     if(!r.dept) issues.push('Missing department');
+    if(!r.college) issues.push('Missing college');
     if(!/^\S+@\S+\.\S+$/.test(r.email)) issues.push('Invalid email');
     if(!/^[6-9]\d{9}$/.test(r.phone)) issues.push('Invalid phone');
     return { ...r, issues };
@@ -2111,7 +2449,7 @@ function validateBulkRows(rows){
 async function renderBulkPreview(){
   bulkRows = bulkSelectedFile ? validateBulkRows(await extractBulkRows(bulkSelectedFile)) : [];
   if(!bulkRows.length){
-    document.getElementById('bulkPreviewTbody').innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="e-ic">▦</div>No rows could be read from this file.</div></td></tr>`;
+    document.getElementById('bulkPreviewTbody').innerHTML = `<tr><td colspan="8"><div class="empty-state"><div class="e-ic">▦</div>No rows could be read from this file.</div></td></tr>`;
     document.getElementById('bulkValSummary').innerHTML = '';
     return;
   }
@@ -2119,6 +2457,7 @@ async function renderBulkPreview(){
     <tr class="${r.issues.length ? 'row-invalid' : ''}">
       <td>${r.name || '<span style="color:var(--rose);">—</span>'}</td>
       <td>${r.roll}</td>
+      <td>${r.college || '<span style="color:var(--rose);">—</span>'}</td>
       <td>${r.dept || '<span style="color:var(--rose);">—</span>'}</td>
       <td>${r.year}</td>
       <td>${r.section}</td>
@@ -2174,8 +2513,10 @@ async function bulkPerformImport(){
   const nextBtn = document.getElementById('bulkNextBtn');
   nextBtn.disabled = true; nextBtn.textContent = 'Importing…';
 
-  const validRows = bulkRows.filter(r=>!r.issues.length);
-  const res = await trainerApi('/students/bulk-import', { method:'POST', body:{ students: validRows } });
+  // Send every row to the backend — it is the authority on college/department
+  // relationships, DB duplicates, and per-row reasons. Client-side flags above
+  // are advisory; the response's `rejected` array is the source of truth.
+  const res = await trainerApi('/students/bulk-import', { method:'POST', body:{ students: bulkRows } });
 
   nextBtn.disabled = false; nextBtn.textContent = 'Import Students';
 
@@ -2183,11 +2524,28 @@ async function bulkPerformImport(){
     showErrorToast(res.data.message || 'Import failed — connection to server timed out.', bulkPerformImport);
     return;
   }
-  const importedCount = res.data.imported ?? validRows.length;
+  const importedCount = res.data.imported ?? 0;
+  const rejected = Array.isArray(res.data.rejected) ? res.data.rejected : [];
   await loadStudents();
   bulkStep = 3; updateBulkStepperUI();
-  document.getElementById('bulkSuccessTitle').textContent = `${importedCount} students successfully imported.`;
-  showToast(`${importedCount} students successfully imported`, '✓');
+
+  document.getElementById('bulkSuccessTitle').textContent = `${importedCount} student${importedCount===1?'':'s'} successfully imported.`;
+  const rejWrap = document.getElementById('bulkRejectedWrap');
+  const rejList = document.getElementById('bulkRejectedList');
+  if(rejected.length){
+    document.getElementById('bulkSuccessText').textContent = `${rejected.length} row${rejected.length===1?'':'s'} were skipped — see the reasons below.`;
+    rejList.innerHTML = rejected.map(r => `
+      <div class="rejected-row">
+        <span class="rr-idx">#${Number(r.index)+1}</span>
+        <span class="rr-name">${esc(r.name || '—')}</span>
+        <span class="rr-reason">${esc(r.reason)}</span>
+      </div>`).join('');
+    rejWrap.style.display = 'block';
+  } else {
+    document.getElementById('bulkSuccessText').textContent = 'They now appear in your student roster and are ready for attendance & assessments.';
+    rejWrap.style.display = 'none';
+  }
+  showToast(`${importedCount} imported${rejected.length ? ', '+rejected.length+' skipped' : ''}`, rejected.length ? '⚠' : '✓');
 }
 
 function showErrorToast(msg, onRetry){
@@ -2596,6 +2954,8 @@ const ACTIVITY_ICON = {
   assessment_deleted: { ic:'✕', cls:'ic-rose' },
   manual_interview_scheduled: { ic:'◫', cls:'ic-rose' },
   manual_interview_scored: { ic:'★', cls:'ic-teal' },
+  student_added: { ic:'＋', cls:'ic-teal' },
+  student_bulk_imported: { ic:'⇧', cls:'ic-amber' },
 };
 function timeAgo(iso){
   if(!iso) return '';
@@ -2617,7 +2977,7 @@ async function loadRecentActivity(){
   if(!rows.length){ list.innerHTML = `<div class="empty-state"><div class="e-ic">▦</div>No recent activity found.</div>`; return; }
   list.innerHTML = rows.map(a => {
     const meta = ACTIVITY_ICON[a.action] || { ic:'▦', cls:'ic-ink' };
-    return `<div class="activity-item"><span class="activity-ic ${meta.cls}">${meta.ic}</span><div><div class="a-text">${a.description || ''}</div><div class="a-time">${timeAgo(a.createdAt)}</div></div></div>`;
+    return `<div class="activity-item"><span class="activity-ic ${meta.cls}">${meta.ic}</span><div><div class="a-text">${a.description || ''}</div><div class="a-time">${a.createdAtIST || timeAgo(a.createdAt)}</div></div></div>`;
   }).join('');
 }
 async function loadDashboardSummary(){
@@ -2699,7 +3059,7 @@ function renderDepartmentRanking(rows){
   const wrap = document.getElementById('deptRankingList');
   if(!wrap) return;
   wrap.innerHTML = rows.length ? rows.map((r,i)=>`
-    <div class="rank-row"><span class="rank-num">${i+1}</span><div class="rank-info"><div class="r-name">${r.name}</div><div class="bar-track"><div class="bar-fill" data-w="${r.value}" style="width:0"></div></div></div><span class="rank-val">${r.value}%</span></div>`).join('')
+    <div class="rank-row"><span class="rank-num">${i+1}</span><div class="rank-info"><div class="r-name">${r.name}${r.college ? `<span class="r-college">${r.college}</span>` : ''}</div><div class="bar-track"><div class="bar-fill" data-w="${r.value}" style="width:0"></div></div></div><span class="rank-val">${r.value}%</span></div>`).join('')
     : `<div class="empty-state"><div class="e-ic">▲</div>No department ranking data yet.</div>`;
   requestAnimationFrame(()=> wrap.querySelectorAll('.bar-fill').forEach(b=> b.style.width = b.dataset.w+'%'));
 }

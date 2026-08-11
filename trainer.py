@@ -11,11 +11,16 @@ The Entry Level cohort option and assignment rule is IDENTICAL to
 Super Admin — both call the same quiz_common helpers.
 """
 
+import re
+
+from datetime import datetime, timedelta
+
 from flask import Blueprint, request, send_file
 from flask_jwt_extended import get_jwt_identity
 
 from quiz_common import (
-    ok, error, role_required, now, to_object_id, serialize, iso_utc,
+    ok, error, role_required, now, to_object_id, serialize, iso_utc, fmt_ist,
+    attendance_summary,
     VALID_COHORT_TARGETS, ENTRY_LEVEL,
     cohort_counts, record_interview_score_for_cohort,
     log_activity, get_recent_activity,
@@ -24,10 +29,48 @@ from quiz_common import (
     compute_quiz_analytics, list_quiz_responses,
     list_distinct_departments, build_quiz_responses_workbook,
 )
-from colleges import resolve_active_department
+from colleges import resolve_active_department, _generate_temp_password, department_public
+from reporting import excel_bytes, pdf_bytes
+from login import validate_email, validate_mobile
 
 
-def init_trainer(db):
+# ------------------------------------------------------------
+# Dashboard insights — every value in GET /dashboard/insights is
+# computed live from db.assessment_attempts (the same source every
+# placement-readiness number in this module uses), scoped to the
+# trainer's own college. Nothing here is hardcoded, and nothing is
+# cached beyond the lifetime of a single request.
+# ------------------------------------------------------------
+COHORT_RADAR_LABELS = {
+    "A": "Cohort A",
+    "B": "Cohort B",
+    "C": "Cohort C",
+    "entry_level": "Entry Level",
+}
+RADAR_COHORT_ORDER = ["entry_level", "A", "B", "C"]
+
+
+def _week_buckets(weeks=8):
+    """Monday-anchored calendar weeks, oldest first, ending with the week
+    containing today. Returns (start, end, label) triples using naive UTC
+    datetimes — the same clock stored submittedAt values live on, matching
+    the _month_bounds() convention in superadmin.py. Week boundaries are
+    midnight-aligned (Monday 00:00), like _month_bounds() month starts."""
+    today = datetime.utcnow()
+    anchor = (today - timedelta(days=today.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return [
+        (
+            anchor - timedelta(weeks=offset),
+            anchor - timedelta(weeks=offset - 1),
+            (anchor - timedelta(weeks=offset)).strftime("%b %d"),
+        )
+        for offset in range(weeks - 1, -1, -1)
+    ]
+
+
+def init_trainer(db, bcrypt=None):
     bp = Blueprint("trainer", __name__)
 
     users = db.users
@@ -43,6 +86,94 @@ def init_trainer(db):
     def _trainer_college():
         trainer = _trainer_doc()
         return (trainer or {}).get("college")
+
+    # ------------------------------------------------------------
+    # Shared student-roster query — backs GET /students AND the
+    # /students/export download so a filtered export is always
+    # byte-for-byte the same rows the table is showing. Trainers
+    # manage the whole platform roster (no trainer↔student binding),
+    # so there is deliberately NO college scoping here.
+    # ------------------------------------------------------------
+    def _student_roster(college="", department="", cohort="", search=""):
+        query = {"role": "student"}
+        if college:
+            query["college"] = {"$in": [c.strip() for c in college.split(",") if c.strip()]}
+        if department:
+            query["department"] = {"$in": [d.strip() for d in department.split(",") if d.strip()]}
+        and_parts = []
+        if cohort:
+            or_parts = []
+            for c in [x.strip() for x in cohort.split(",") if x.strip()]:
+                if c == ENTRY_LEVEL:
+                    or_parts.append({"cohort": None})
+                    or_parts.append({"cohort": {"$exists": False}})
+                elif c in {"A", "B", "C"}:
+                    or_parts.append({"cohort": c})
+            if or_parts:
+                and_parts.append({"$or": or_parts})
+        if search:
+            rx = {"$regex": re.escape(search), "$options": "i"}
+            and_parts.append({"$or": [
+                {"fullName": rx}, {"rollNumber": rx}, {"email": rx},
+            ]})
+        if and_parts:
+            query["$and"] = and_parts
+
+        docs = list(users.find(query, {"passwordHash": 0}).sort("createdAt", -1))
+        ids = [d["_id"] for d in docs]
+
+        att_map = {}
+        for r in db.attendance.find(
+            {"studentId": {"$in": ids}}, {"studentId": 1, "status": 1}
+        ):
+            bucket = att_map.setdefault(str(r.get("studentId")), [0, 0])
+            if r.get("status") == "present":
+                bucket[0] += 1
+            elif r.get("status") == "absent":
+                bucket[1] += 1
+
+        score_map = {}
+        for a in quiz_attempts.find(
+            {"status": "submitted", "studentId": {"$in": ids}},
+            {"studentId": 1, "overall.percentage": 1},
+        ):
+            pct = (a.get("overall") or {}).get("percentage")
+            if pct is not None:
+                score_map.setdefault(str(a.get("studentId")), []).append(pct)
+
+        rows = []
+        for d in docs:
+            present, absent = att_map.get(str(d["_id"]), [0, 0])
+            total = present + absent
+            scores = score_map.get(str(d["_id"]), [])
+            rows.append({
+                "id": str(d["_id"]),
+                "fullName": d.get("fullName"),
+                "rollNumber": d.get("rollNumber"),
+                "email": d.get("email"),
+                "mobile": d.get("mobile"),
+                "college": d.get("college"),
+                "collegeId": str(d["collegeId"]) if d.get("collegeId") else None,
+                "department": d.get("department"),
+                "departmentId": str(d["departmentId"]) if d.get("departmentId") else None,
+                "cohort": d.get("cohort"),
+                "attendancePct": round(present / total * 100, 1) if total else None,
+                "quizScore": round(sum(scores) / len(scores), 1) if scores else None,
+                "status": d.get("approvalStatus") or "approved",
+                "createdAt": iso_utc(d.get("createdAt")),
+            })
+        return rows
+
+    @bp.route("/students", methods=["GET"])
+    @role_required("trainer")
+    def list_students():
+        rows = _student_roster(
+            college=(request.args.get("college") or "").strip(),
+            department=(request.args.get("department") or "").strip(),
+            cohort=(request.args.get("cohort") or "").strip(),
+            search=(request.args.get("search") or "").strip(),
+        )
+        return ok({"students": rows, "total": len(rows)})
 
     # ==========================================================
     # ASSESSMENT CREATION — same rules as Super Admin, incl. Entry Level
@@ -181,7 +312,8 @@ def init_trainer(db):
     @role_required("trainer")
     def list_cohort_students():
         cohort = request.args.get("cohort", "").strip()
-        query = {"role": "student", "college": _trainer_college()}
+        # Trainers manage the whole roster — no college scoping.
+        query = {"role": "student"}
         if cohort == ENTRY_LEVEL:
             query["$or"] = [{"cohort": None}, {"cohort": {"$exists": False}}]
         elif cohort in {"A", "B", "C"}:
@@ -480,9 +612,11 @@ def init_trainer(db):
     @bp.route("/activity", methods=["GET"])
     @role_required("trainer")
     def recent_activity():
-        college = _trainer_college()
-        limit = int(request.args.get("limit", 20))
-        rows = get_recent_activity(db, {"college": college}, limit=limit)
+        trainer = _trainer_doc()
+        actor_id = str(trainer["_id"]) if trainer and trainer.get("_id") else None
+        limit = max(1, min(int(request.args.get("limit", 5)), 50))
+        query = {"actorId": actor_id} if actor_id else {}
+        rows = get_recent_activity(db, query, limit=limit)
         return ok({"activity": rows})
 
     # ==========================================================
@@ -499,17 +633,19 @@ def init_trainer(db):
     @bp.route("/dashboard/summary", methods=["GET"])
     @role_required("trainer")
     def dashboard_summary():
-        college = _trainer_college()
-        total_students = users.count_documents({"role": "student", "college": college})
-        student_ids = [s["_id"] for s in users.find({"role": "student", "college": college}, {"_id": 1})]
-
+        # Trainers manage the whole roster (no trainer↔student binding), so
+        # both hero values are platform-wide. Average Score reads the same
+        # db.quiz_attempts collection students actually submit into via Quiz
+        # Management (db.assessment_attempts is the older, unused engine and
+        # stays empty — see quiz-responses notes).
+        total_students = users.count_documents({"role": "student"})
         scores = [
-            att["overall"]["percentage"]
-            for att in attempts.find(
-                {"status": "submitted", "studentId": {"$in": student_ids}},
+            a["overall"]["percentage"]
+            for a in quiz_attempts.find(
+                {"status": "submitted"},
                 {"overall.percentage": 1},
             )
-            if att.get("overall", {}).get("percentage") is not None
+            if a.get("overall", {}).get("percentage") is not None
         ]
         avg_quiz_score = round(sum(scores) / len(scores), 1) if scores else None
 
@@ -552,5 +688,510 @@ def init_trainer(db):
             "categoryPercentage": skill_radar,
             "performanceTrend": trend_points,
         })
+
+    # ==========================================================
+    # DASHBOARD INSIGHTS — Readiness Trend, Department Ranking,
+    # Skill Radar, Avg Improvement ring and Upcoming Sessions, all
+    # computed live from db.assessment_attempts / db.workshop_sessions
+    # and scoped to the trainer's own college. The frontend renders
+    # these five widgets entirely from this one response.
+    # ==========================================================
+    @bp.route("/dashboard/insights", methods=["GET"])
+    @role_required("trainer")
+    def dashboard_insights():
+        trainer = _trainer_doc()
+        # Trainers manage the whole roster — insights aggregate every
+        # submitted assessment attempt platform-wide.
+        student_ids = [s["_id"] for s in users.find({"role": "student"}, {"_id": 1})]
+
+        empty = {
+            "readinessTrend": [],
+            "departmentRanking": [],
+            "skillRadar": [],
+            "improvementRing": None,
+            "upcomingSessions": [],
+        }
+        if not student_ids:
+            return ok(empty)
+
+        # Single pass over all submitted attempts feeds every
+        # metric below, so all five widgets can never drift apart.
+        week_agg = {}             # week index -> [sum, n]
+        dept_best = {}            # department -> {studentId: (best_pct, college)}
+        cohort_best = {}          # cohort slug -> {studentId: best_pct}
+        student_results = {}      # studentId -> {assessmentId: (submittedAt, pct)}
+
+        buckets = _week_buckets()
+        for att in attempts.find(
+            {"status": "submitted", "studentId": {"$in": student_ids}}
+        ).sort("submittedAt", 1):
+            pct = (att.get("overall") or {}).get("percentage")
+            if pct is None:
+                continue
+            sid = att.get("studentId")
+            submitted_at = att.get("submittedAt")
+            dept = att.get("department")
+
+            # 1. Readiness Trend — the platform's weekly average score.
+            # A week with no submissions is a missing data point, not a
+            # 0% week, so empty weeks are omitted from the trend.
+            if submitted_at is not None:
+                for idx, (ws, we, _label) in enumerate(buckets):
+                    if ws <= submitted_at < we:
+                        bucket = week_agg.setdefault(idx, [0.0, 0])
+                        bucket[0] += pct
+                        bucket[1] += 1
+                        break
+
+            # 2. Department Ranking — per-student best attempt, averaged
+            # across the department (mirrors the institution-ranking rule).
+            # The department's college is the college of that student's
+            # best attempt, so a same-named department in two colleges
+            # never merges into one misleading row.
+            if dept and sid is not None:
+                best = dept_best.setdefault(dept, {})
+                if sid not in best or pct > best[sid][0]:
+                    best[sid] = (pct, att.get("college"))
+
+            # 3. Skill Radar — per-student best attempt per cohort, so each
+            # cohort axis is that cohort's average achieved score.
+            if sid is not None:
+                slug = att.get("cohort")
+                slug = slug if slug in COHORT_RADAR_LABELS else ENTRY_LEVEL
+                best = cohort_best.setdefault(slug, {})
+                if sid not in best or pct > best[sid]:
+                    best[sid] = pct
+
+            # 4. Avg Improvement — only the LATEST attempt per assessment
+            # counts as that assessment's result, so a student retaking the
+            # same assessment never produces a fake zero-delta "improvement".
+            if sid is not None and submitted_at is not None:
+                assess_key = str(att.get("assessmentId") or att.get("assessmentName") or "")
+                per_student = student_results.setdefault(sid, {})
+                prev = per_student.get(assess_key)
+                if prev is None or submitted_at >= prev[0]:
+                    per_student[assess_key] = (submitted_at, pct)
+
+        readiness_trend = [
+            {"label": buckets[idx][2], "value": round(week_agg[idx][0] / week_agg[idx][1], 1)}
+            for idx in sorted(week_agg)
+        ]
+
+        department_ranking = []
+        for dept, best_map in dept_best.items():
+            if not best_map:
+                continue
+            top_college = None
+            top_pct = -1
+            values = []
+            for sid, (best_pct, college) in best_map.items():
+                values.append(best_pct)
+                if best_pct > top_pct:
+                    top_pct = best_pct
+                    top_college = college
+            department_ranking.append({
+                "name": dept,
+                "college": top_college,
+                "value": round(sum(values) / len(values), 1),
+            })
+        department_ranking.sort(key=lambda r: r["value"], reverse=True)
+        department_ranking = department_ranking[:5]
+
+        skill_radar = []
+        for slug in RADAR_COHORT_ORDER:
+            best_map = cohort_best.get(slug)
+            if not best_map:
+                continue
+            skill_radar.append({
+                "label": COHORT_RADAR_LABELS[slug],
+                "value": round(sum(best_map.values()) / len(best_map), 1),
+            })
+
+        # Average improvement = mean of every per-student delta between two
+        # consecutive, distinct assessment results (previous -> subsequent).
+        deltas = []
+        for per_student in student_results.values():
+            ordered = sorted(per_student.values(), key=lambda item: item[0])
+            for i in range(1, len(ordered)):
+                deltas.append(ordered[i][1] - ordered[i - 1][1])
+
+        improvement_ring = None
+        if deltas:
+            avg_delta = sum(deltas) / len(deltas)
+            improvement_ring = {
+                "pct": round(max(0.0, min(100.0, avg_delta)), 1),
+                "improvementLabel": "{}{}%".format(
+                    "+" if avg_delta > 0 else "", round(avg_delta, 1)
+                ),
+                "workshopsCount": None,
+                "avgRating": None,
+            }
+
+        # 5. Upcoming Sessions — this trainer's assigned workshop sessions
+        # whose start datetime hasn't passed yet. Dates are stored as
+        # server-local wall clock (YYYY-MM-DD + HH:MM), the same convention
+        # superadmin.py's session rules use.
+        upcoming_sessions = []
+        if trainer is not None and trainer.get("_id") is not None:
+            trainer_oid = trainer["_id"]
+            today = datetime.now()
+            if improvement_ring is not None:
+                improvement_ring["workshopsCount"] = db.workshop_sessions.count_documents(
+                    {"trainerIds": trainer_oid}
+                )
+            for doc in db.workshop_sessions.find({
+                "trainerIds": trainer_oid,
+                "status": "scheduled",
+                "date": {"$gte": today.strftime("%Y-%m-%d")},
+            }):
+                date_str = doc.get("date")
+                start_time = doc.get("startTime")
+                try:
+                    start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
+                except (ValueError, TypeError):
+                    continue
+                if start_dt < today:
+                    continue
+                end_time = doc.get("endTime")
+                parsed_date = datetime.strptime(date_str, "%Y-%m-%d")
+                time_str = f"{start_time}\u2013{end_time}" if end_time else start_time
+                upcoming_sessions.append({
+                    "name": doc.get("name"),
+                    "meta": f"{parsed_date.strftime('%d %b %Y')} \u2022 {time_str}",
+                    "isToday": date_str == today.strftime("%Y-%m-%d"),
+                    "_sort_dt": start_dt,
+                })
+            upcoming_sessions.sort(key=lambda s: s["_sort_dt"])
+            for s in upcoming_sessions:
+                s.pop("_sort_dt", None)
+            upcoming_sessions = upcoming_sessions[:5]
+
+        return ok({
+            "readinessTrend": readiness_trend,
+            "departmentRanking": department_ranking,
+            "skillRadar": skill_radar,
+            "improvementRing": improvement_ring,
+            "upcomingSessions": upcoming_sessions,
+        })
+
+    # ==========================================================
+    # STUDENT ROSTER — All Students list, single add, bulk import
+    # and PDF/Excel export. Trainers manage the whole platform
+    # roster (no trainer↔student binding), so the trainer picks the
+    # college on the add form / per bulk row and every query here
+    # is platform-wide.
+    #
+    # New students are created APPROVED (no approval queue) with a
+    # server-generated temporary password that is returned EXACTLY
+    # once so the trainer can hand it to the student securely.
+    # firstLoginVerify forces the student to set their own password
+    # + OTP-verify on first login (existing login.py flow). Cohort
+    # starts at Entry Level (None) — the identical rule to
+    # self-registration (login.py) and Super Admin bulk import.
+    # ==========================================================
+    @bp.route("/students/departments", methods=["GET"])
+    @role_required("trainer")
+    def trainer_student_departments():
+        """Every active college with its active departments — feeds the
+        Add Student college + dynamic department dropdowns."""
+        depts = list(db.departments.find({"status": "active"}).sort("department_name", 1))
+        by_college = {}
+        for d in depts:
+            by_college.setdefault(str(d.get("college_id")), []).append(department_public(d))
+        colleges = []
+        for c in db.colleges.find({"status": "active"}).sort("college_name", 1):
+            colleges.append({
+                "id": str(c["_id"]),
+                "name": c.get("college_name"),
+                "departments": by_college.get(str(c["_id"]), []),
+            })
+        return ok({"colleges": colleges})
+
+    @bp.route("/students", methods=["POST"])
+    @role_required("trainer")
+    def create_student():
+        data = request.get_json(silent=True) or {}
+        full_name = (data.get("fullName") or "").strip()
+        email = (data.get("email") or "").strip().lower()
+        mobile = (data.get("mobile") or "").strip()
+        roll_number = (data.get("rollNumber") or "").strip()
+        department_id = data.get("departmentId")
+        college_id = data.get("collegeId")
+
+        if not full_name:
+            return error("Full name is required.")
+        if not roll_number:
+            return error("Roll Number is required.")
+        if not department_id:
+            return error("Department is required.")
+        if not college_id:
+            return error("Select a college.")
+
+        email_err = validate_email(email)
+        if email_err:
+            return error(email_err)
+        mobile_err = validate_mobile(mobile)
+        if mobile_err:
+            return error(mobile_err)
+
+        if users.find_one({"email": email}):
+            return error("An account with this email already exists.")
+        if users.find_one({"role": "student", "rollNumber": roll_number}):
+            return error("A student with this Roll Number already exists.")
+
+        # Exact college/department relationship check: the department must
+        # actually belong to the chosen (active) college.
+        college_doc = db.colleges.find_one({"_id": to_object_id(college_id), "status": "active"})
+        if not college_doc:
+            return error("Selected college is invalid or inactive.")
+        department_doc = resolve_active_department(db, department_id, str(college_id))
+        if not department_doc:
+            return error("Selected department is invalid or inactive for the chosen college.")
+
+        # Password: the trainer may set one (must confirm it) or let the
+        # backend generate a random temporary password. Either way the
+        # student must change it at first login (firstLoginVerify).
+        password = data.get("password") or ""
+        confirm_password = data.get("confirmPassword") or ""
+        password_generated = False
+        if password:
+            if password != confirm_password:
+                return error("Passwords do not match.")
+            if len(password) < 6:
+                return error("Password must be at least 6 characters.")
+            temp_password = password
+        else:
+            temp_password = _generate_temp_password()
+            password_generated = True
+
+        if bcrypt is None:
+            return error("Student creation is not available right now.", 503)
+
+        password_hash = bcrypt.generate_password_hash(temp_password).decode("utf-8")
+        user_doc = {
+            "fullName": full_name,
+            "email": email,
+            "mobile": mobile,
+            "role": "student",
+            "passwordHash": password_hash,
+            "approvalStatus": "approved",
+            "approvedBy": f"trainer:{get_jwt_identity()}",
+            "approvedDate": now(),
+            "googleLogin": False,
+            "isDeleted": False,
+            "firstLoginVerify": True,
+            "firstLoginVerifiedAt": None,
+            "cohort": None,
+            "baselineAssessmentScore": None,
+            "interviewScore": None,
+            "finalEmployabilityScore": None,
+            "cohortAssignedAt": None,
+            "rollNumber": roll_number,
+            "tneaCode": None,
+            "college": college_doc["college_name"],
+            "collegeId": college_doc["_id"],
+            "department": department_doc["department_name"],
+            "departmentId": department_doc["_id"],
+            "district": None,
+            "employeeId": None,
+            "createdAt": now(),
+            "updatedAt": now(),
+        }
+        result = users.insert_one(user_doc)
+        log_activity(
+            db, get_jwt_identity(), "trainer", "student_added",
+            f'Added student {full_name} ({roll_number}) to {department_doc["department_name"]}, {college_doc["college_name"]}',
+            college=college_doc["college_name"], student_id=result.inserted_id,
+            meta={"department": department_doc["department_name"], "college": college_doc["college_name"]},
+        )
+        return ok({
+            "student": {
+                "id": str(result.inserted_id),
+                "name": full_name,
+                "email": email,
+                "rollNumber": roll_number,
+                "college": college_doc["college_name"],
+                "department": department_doc["department_name"],
+            },
+            "temporaryPassword": temp_password if password_generated else None,
+            "passwordSet": not password_generated,
+        }, message="Student created. They must set their own password at first login.", status=201)
+
+    @bp.route("/students/bulk-import", methods=["POST"])
+    @role_required("trainer")
+    def bulk_import_students():
+        data = request.get_json(silent=True) or {}
+        rows = data.get("students") or []
+        if not isinstance(rows, list) or not rows:
+            return error("No student rows provided.")
+        if len(rows) > 1000:
+            return error("Maximum 1000 rows per import.")
+        if bcrypt is None:
+            return error("Student import is not available right now.", 503)
+
+        colleges_by_id = {}
+        colleges_by_name = {}
+        for c in db.colleges.find({}):
+            colleges_by_id[str(c["_id"])] = c
+            colleges_by_name[str(c.get("college_name") or "").strip().lower()] = c
+
+        existing_emails = {u["email"] for u in users.find(
+            {"role": "student", "email": {"$ne": None}}, {"email": 1})}
+        existing_rolls = {str(u["rollNumber"]).lower() for u in users.find(
+            {"role": "student", "rollNumber": {"$ne": None}}, {"rollNumber": 1})}
+
+        imported = 0
+        rejected = []
+        created = []
+        batch_emails = set()
+        batch_rolls = set()
+
+        for i, r in enumerate(rows):
+            if not isinstance(r, dict):
+                rejected.append({"index": i, "name": "", "reason": "Row is not an object."})
+                continue
+            name = (r.get("name") or "").strip()
+            roll = (r.get("roll") or "").strip()
+            email = (r.get("email") or "").strip().lower()
+            phone = (r.get("phone") or "").strip()
+            dept = (r.get("dept") or "").strip()
+            college_ref = (r.get("college") or "").strip()
+
+            reasons = []
+            if not name:
+                reasons.append("Missing name")
+            if not roll:
+                reasons.append("Missing roll number")
+            email_err = validate_email(email) if email else "Missing email"
+            if email_err:
+                reasons.append(email_err)
+            mobile_err = validate_mobile(phone) if phone else "Missing phone"
+            if mobile_err:
+                reasons.append(mobile_err)
+            if not dept:
+                reasons.append("Missing department")
+            if not college_ref:
+                reasons.append("Missing college")
+
+            college_doc = None
+            if college_ref:
+                college_doc = colleges_by_id.get(college_ref) or colleges_by_name.get(college_ref.lower())
+                if not college_doc:
+                    reasons.append(f"Unknown college: {college_ref}")
+
+            dept_doc = None
+            if college_doc and dept:
+                dept_doc = db.departments.find_one({
+                    "college_id": college_doc["_id"],
+                    "department_name": {"$regex": f"^{re.escape(dept)}$", "$options": "i"},
+                    "status": "active",
+                })
+                if not dept_doc:
+                    reasons.append(f"Department '{dept}' does not exist in {college_doc.get('college_name')}")
+
+            if email:
+                if email in existing_emails or email in batch_emails:
+                    reasons.append("Email already registered")
+            if roll:
+                if roll.lower() in existing_rolls or roll.lower() in batch_rolls:
+                    reasons.append("Roll number already exists")
+
+            if reasons:
+                rejected.append({"index": i, "name": name, "reason": "; ".join(reasons)})
+                continue
+
+            temp_password = _generate_temp_password()
+            password_hash = bcrypt.generate_password_hash(temp_password).decode("utf-8")
+            user_doc = {
+                "fullName": name,
+                "email": email,
+                "mobile": phone,
+                "role": "student",
+                "passwordHash": password_hash,
+                "approvalStatus": "approved",
+                "approvedBy": f"trainer:{get_jwt_identity()}",
+                "approvedDate": now(),
+                "googleLogin": False,
+                "isDeleted": False,
+                "firstLoginVerify": True,
+                "firstLoginVerifiedAt": None,
+                "cohort": None,
+                "baselineAssessmentScore": None,
+                "interviewScore": None,
+                "finalEmployabilityScore": None,
+                "cohortAssignedAt": None,
+                "rollNumber": roll,
+                "tneaCode": None,
+                "college": college_doc["college_name"],
+                "collegeId": college_doc["_id"],
+                "department": dept_doc["department_name"],
+                "departmentId": dept_doc["_id"],
+                "district": None,
+                "employeeId": None,
+                "createdAt": now(),
+                "updatedAt": now(),
+            }
+            res = users.insert_one(user_doc)
+            existing_emails.add(email)
+            batch_emails.add(email)
+            existing_rolls.add(roll.lower())
+            batch_rolls.add(roll.lower())
+            imported += 1
+            created.append({
+                "id": str(res.inserted_id), "name": name, "email": email,
+                "temporaryPassword": temp_password,
+            })
+
+        if imported:
+            log_activity(
+                db, get_jwt_identity(), "trainer", "student_bulk_imported",
+                f"Bulk imported {imported} student{'s' if imported != 1 else ''} "
+                f"({len(rejected)} rejected)",
+                meta={"imported": imported, "rejected": len(rejected)},
+            )
+        return ok({
+            "imported": imported,
+            "rejected": rejected,
+            "students": created,
+        }, message=f"{imported} student(s) imported.")
+
+    @bp.route("/students/export", methods=["GET"])
+    @role_required("trainer")
+    def students_export():
+        """Server-side PDF / Excel export of exactly what the All Students
+        table is currently showing (same filters, same query)."""
+        rows = _student_roster(
+            college=(request.args.get("college") or "").strip(),
+            department=(request.args.get("department") or "").strip(),
+            cohort=(request.args.get("cohort") or "").strip(),
+            search=(request.args.get("search") or "").strip(),
+        )
+        columns = ["Student Name", "Roll Number", "Email", "Mobile", "College",
+                   "Department", "Cohort", "Attendance %", "Avg Quiz Score", "Status"]
+
+        def _cohort_label(c):
+            if c in {"A", "B", "C"}:
+                return f"Cohort {c}"
+            return c or "Entry Level"
+
+        data_rows = [[
+            r["fullName"], r["rollNumber"], r["email"], r["mobile"], r["college"],
+            r["department"], _cohort_label(r["cohort"]),
+            r["attendancePct"] if r["attendancePct"] is not None else "—",
+            r["quizScore"] if r["quizScore"] is not None else "—",
+            r["status"],
+        ] for r in rows]
+        fmt = (request.args.get("format") or "xlsx").lower()
+        if fmt == "pdf":
+            buf = pdf_bytes(
+                "Student Directory",
+                f"Generated {fmt_ist(now(), '%d %b %Y %H:%M')} IST · {len(data_rows)} students",
+                columns, data_rows,
+            )
+            return send_file(buf, mimetype="application/pdf", as_attachment=True,
+                             download_name="student_directory.pdf")
+        buf = excel_bytes(columns, data_rows, "Students")
+        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                         as_attachment=True, download_name="student_directory.xlsx")
 
     return bp
