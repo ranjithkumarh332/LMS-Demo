@@ -1533,7 +1533,7 @@ def init_superadmin(db, bcrypt=None):
 
         columns = ["College", "Status", "Departments", "Students", "Admin", "Email", "Phone"]
         fmt = (request.args.get("format") or "pdf").lower()
-        subtitle = f"{len(rows)} college(s) on the platform · generated {datetime.utcnow().strftime('%d %b %Y %H:%M UTC')}"
+        subtitle = f"{len(rows)} college(s) on the platform · generated {fmt_ist(now())}"
         if fmt == "excel":
             return send_file(
                 _excel_bytes(columns, rows, "College Directory"),
@@ -1917,13 +1917,14 @@ def init_superadmin(db, bcrypt=None):
             "attemptsCount": len(attempts),
         })
 
-    def _overall_report_rows(student_oid=None, quiz_ids=None, college=None, colleges=None):
+    def _overall_report_rows(student_oid=None, quiz_ids=None, college=None, colleges=None,
+                              department=None):
         """Shared row builder (lives in reporting.py so the
         Trainer dashboard uses the identical implementation) — every row is
         computed live from db.quiz_attempts + db.users.finalEmployabilityScore."""
         return reporting.overall_report_rows(
             db, users, student_oid=student_oid, quiz_ids=quiz_ids,
-            college=college, colleges=colleges,
+            college=college, colleges=colleges, department=department,
         )
 
     @bp.route("/reports/overall", methods=["GET"])
@@ -1959,15 +1960,36 @@ def init_superadmin(db, bcrypt=None):
     @bp.route("/reports/overall/export", methods=["GET"])
     @role_required("super_admin")
     def admin_overall_report_export():
+        """Overall Platform Report export. Mirrors whatever the admin has
+        selected on the Overall Report screen: an optional single
+        `department` (from the Department dropdown) plus a free-text `q`
+        search across student/roll/college/department/assessment — the
+        same fields overallReportFiltered() matches client-side. Without
+        these, the download must be everything the admin is looking at
+        with no filter applied, i.e. every submitted attempt."""
         fmt = (request.args.get("format") or "pdf").lower()
-        rows = _overall_report_rows()
+        department = (request.args.get("department") or "").strip()
+        search = (request.args.get("q") or "").strip().lower()
+        rows = _overall_report_rows(department=department if department and department != "all" else None)
+        if search:
+            def _matches(r):
+                hay = " ".join(str(r.get(k) or "") for k in
+                                ("studentName", "rollNumber", "college", "department", "assessmentName")).lower()
+                return search in hay
+            rows = [r for r in rows if _matches(r)]
         columns = ["Student", "Register No", "Department", "College", "Assessment",
                    "Quiz %", "Interview %", "Average %", "Final Overall %", "Submitted"]
         data = [[r["studentName"] or "—", r["rollNumber"] or "—", r["department"] or "—",
                  r["college"] or "—", r["assessmentName"] or "—", _fmt(r["quizMarks"]),
                  _fmt(r["interviewMarks"]), _fmt(r["averageMarks"]), _fmt(r["finalOverallMarks"]),
                  (r["submittedAt"] or "")[:16].replace("T", " ")] for r in rows]
-        subtitle = f"{len(rows)} submitted attempt(s) across the platform · generated {datetime.utcnow().strftime('%d %b %Y %H:%M UTC')}"
+        filter_bits = []
+        if department and department != "all":
+            filter_bits.append(f"department: {department}")
+        if search:
+            filter_bits.append(f"search: \"{search}\"")
+        filter_note = f" · filtered by {', '.join(filter_bits)}" if filter_bits else ""
+        subtitle = (f"{len(rows)} submitted attempt(s){filter_note} · generated {fmt_ist(now())}")
         if fmt == "excel":
             return send_file(
                 _excel_bytes(columns, data, "Overall Report"),
@@ -2016,7 +2038,7 @@ def init_superadmin(db, bcrypt=None):
                         for s in students]
 
         subtitle = (f"{college_name} · {len(departments)} department(s) · "
-                    f"{len(students)} student(s) · generated {datetime.utcnow().strftime('%d %b %Y %H:%M UTC')}")
+                    f"{len(students)} student(s) · generated {fmt_ist(now())}")
         return {
             "name": college_name,
             "filename": _safe_filename(college_name),
@@ -2090,7 +2112,7 @@ def init_superadmin(db, bcrypt=None):
         payloads = [_college_report_payload(c) for c in college_docs]
         total_students = sum(p["num_students"] for p in payloads)
         subtitle = (f"{len(payloads)} college report(s) · {total_students} student(s)"
-                    f" · generated {datetime.utcnow().strftime('%d %b %Y %H:%M UTC')}")
+                    f" · generated {fmt_ist(now())}")
 
         if fmt == "excel":
             wb = Workbook()
@@ -2098,7 +2120,7 @@ def init_superadmin(db, bcrypt=None):
             ws.title = "Overview"
             ws.append(["College Reports", len(payloads)])
             ws.append(["Total Students", total_students])
-            ws.append(["Generated", datetime.utcnow().strftime('%d %b %Y %H:%M UTC')])
+            ws.append(["Generated", fmt_ist(now())])
             for p in payloads:
                 sheet = wb.create_sheet(p["filename"][:31])
                 sheet.append(["College Report", p["name"]])
@@ -2289,14 +2311,14 @@ def init_superadmin(db, bcrypt=None):
         payloads = [_student_report_payload(s) for s in students]
         total_sessions = sum(len(p["sections"][1][2]) for p in payloads)
         subtitle = (f"{len(students)} student report(s) · {total_sessions} intervention record(s)"
-                    f" · generated {datetime.utcnow().strftime('%d %b %Y %H:%M UTC')}")
+                    f" · generated {fmt_ist(now())}")
 
         if fmt == "excel":
             wb = Workbook()
             ws = wb.active
             ws.title = "Overview"
             ws.append(["Student Reports", len(students)])
-            ws.append(["Generated", datetime.utcnow().strftime('%d %b %Y %H:%M UTC')])
+            ws.append(["Generated", fmt_ist(now())])
             ws.append([])
             ws.append(["Student", "Register No", "College", "Department", "Cohort"])
             for p, s in zip(payloads, students):
@@ -2404,7 +2426,7 @@ def init_superadmin(db, bcrypt=None):
 
         subtitle = (f"{len(rows)} submitted attempt(s) across {len(ordered)} selected assessment(s)"
                     f"{(' · college: ' + college) if college else ''}"
-                    f" · generated {datetime.utcnow().strftime('%d %b %Y %H:%M UTC')}")
+                    f" · generated {fmt_ist(now())}")
         if fmt == "excel":
             wb = Workbook()
             ws = wb.active
@@ -2520,7 +2542,7 @@ def init_superadmin(db, bcrypt=None):
             ])
         subtitle = (f"{len(docs)} intervention session(s)"
                     f"{(' · status: ' + ', '.join(statuses)) if statuses else ''}"
-                    f" · generated {datetime.utcnow().strftime('%d %b %Y %H:%M UTC')}")
+                    f" · generated {fmt_ist(now())}")
         if fmt == "excel":
             return send_file(
                 _excel_bytes(columns, data, "Intervention Report"),
@@ -2622,7 +2644,7 @@ def init_superadmin(db, bcrypt=None):
             ])
         subtitle = (f"{len(docs)} student(s)"
                     f"{(' · cohort: ' + ', '.join(cohorts)) if cohorts else ''}"
-                    f" · generated {datetime.utcnow().strftime('%d %b %Y %H:%M UTC')}")
+                    f" · generated {fmt_ist(now())}")
         if fmt == "excel":
             return send_file(
                 _excel_bytes(columns, data, "Student Performance"),
@@ -2735,7 +2757,7 @@ def init_superadmin(db, bcrypt=None):
             "college": d.get("college"),
             "meta": d.get("meta") or {},
             "createdAt": iso_utc(d.get("createdAt")),
-            "createdAtIST": fmt_ist(d.get("createdAt")),
+            "createdAtIST": fmt_ist(d.get("createdAt"), "%d-%m-%Y %H:%M:%S"),
         } for d in docs]})
 
     @bp.route("/dashboard/search", methods=["GET"])

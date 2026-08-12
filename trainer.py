@@ -33,6 +33,24 @@ from colleges import resolve_active_department, _generate_temp_password, departm
 from reporting import excel_bytes, pdf_bytes
 from login import validate_email, validate_mobile
 
+# ------------------------------------------------------------
+# ATTENDANCE MODULE — reuses the exact same query/serialization
+# helpers and constants the Super Admin "Mark Attendance" / "View
+# Records" screens are built on (superadmin.py), so Trainer and
+# Super Admin can never disagree about who counts as present/absent,
+# which cohort a student is in, or what a date filter matches. Per
+# the platform's role model, Trainers report to Super Admin (not to
+# a single college) and therefore get the SAME attendance data scope
+# Super Admin has — the routes below are trainer-authenticated
+# mirrors of the Super Admin attendance routes, not a restricted
+# subset.
+# ------------------------------------------------------------
+from superadmin import (
+    ATTENDANCE_STATUSES, ATTENDANCE_COHORT_LABELS, _ATTENDANCE_DATE_RE,
+    _parse_optional_id_list, _attendance_student_query, _attendance_student_public,
+)
+from quiz_common import VALID_COHORTS, student_cohort_label
+
 
 # ------------------------------------------------------------
 # Dashboard insights — every value in GET /dashboard/insights is
@@ -1185,7 +1203,7 @@ def init_trainer(db, bcrypt=None):
         if fmt == "pdf":
             buf = pdf_bytes(
                 "Student Directory",
-                f"Generated {fmt_ist(now(), '%d %b %Y %H:%M')} IST · {len(data_rows)} students",
+                f"Generated {fmt_ist(now())} IST · {len(data_rows)} students",
                 columns, data_rows,
             )
             return send_file(buf, mimetype="application/pdf", as_attachment=True,
@@ -1193,5 +1211,193 @@ def init_trainer(db, bcrypt=None):
         buf = excel_bytes(columns, data_rows, "Students")
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                          as_attachment=True, download_name="student_directory.xlsx")
+
+    # ==========================================================
+    # TRAINER — ATTENDANCE MODULE (db.attendance).
+    # Trainer-authenticated mirror of the Super Admin "Mark Attendance" /
+    # "View Records" routes in superadmin.py. Same collection, same
+    # query builder (_attendance_student_query), same serialization
+    # (_attendance_student_public) and the same unique (studentId, date)
+    # upsert behaviour, so re-marking a student on an existing date
+    # always updates that one record instead of creating a duplicate.
+    # Trainers are not bound to a single college (they report to Super
+    # Admin), so — exactly like Super Admin — no college/department is
+    # ever hardcoded here; every filter option is resolved from the
+    # database and an empty filter means "no restriction".
+    # ==========================================================
+    @bp.route("/attendance/filters", methods=["GET"])
+    @role_required("trainer")
+    def trainer_attendance_filters():
+        college_docs = list(db.colleges.find({"status": "active"}).sort("college_name", 1))
+        dept_docs = list(db.departments.find({"status": "active"}).sort("department_name", 1))
+        trainer_docs = list(users.find(
+            {"role": "trainer", "approvalStatus": {"$in": ["approved", "suspended"]}}
+        ).sort("fullName", 1))
+        return ok({
+            "colleges": [{"id": str(c["_id"]), "name": c.get("college_name")} for c in college_docs],
+            "departments": [
+                {"id": str(d["_id"]), "collegeId": str(d["college_id"]), "name": d.get("department_name")}
+                for d in dept_docs
+            ],
+            "cohorts": [{"value": "all", "label": "All Cohorts"}] + [
+                {"value": c, "label": ATTENDANCE_COHORT_LABELS[c]} for c in sorted(VALID_COHORTS)
+            ] + [{"value": ENTRY_LEVEL, "label": ATTENDANCE_COHORT_LABELS[ENTRY_LEVEL]}],
+            "trainers": [{"id": str(t["_id"]), "name": t.get("fullName") or "—"} for t in trainer_docs],
+        })
+
+    @bp.route("/attendance/students", methods=["GET"])
+    @role_required("trainer")
+    def trainer_list_attendance_students():
+        college_ids, err = _parse_optional_id_list(request.args.get("collegeIds"))
+        if err:
+            return error(err)
+        department_ids, err = _parse_optional_id_list(request.args.get("departmentIds"))
+        if err:
+            return error(err)
+        cohort_param = (request.args.get("cohorts") or "").strip()
+        cohorts = [c for c in cohort_param.split(",") if c.strip()] if cohort_param else []
+        allowed = set(VALID_COHORTS) | {ENTRY_LEVEL, "all"}
+        if any(c not in allowed for c in cohorts):
+            return error("Invalid cohort filter.")
+        query = _attendance_student_query(db, college_ids, department_ids, cohorts)
+        students = list(users.find(query).sort("fullName", 1))
+        return ok({"students": [_attendance_student_public(d) for d in students], "total": len(students)})
+
+    @bp.route("/attendance/mark", methods=["POST"])
+    @role_required("trainer")
+    def trainer_mark_attendance():
+        data = request.get_json(silent=True) or {}
+        date_str = (data.get("date") or "").strip()
+        if not _ATTENDANCE_DATE_RE.match(date_str):
+            return error("A valid date (YYYY-MM-DD) is required.")
+
+        marks = data.get("marks")
+        if not isinstance(marks, list) or not marks:
+            return error("No attendance marks provided.")
+        if len(marks) > 2000:
+            return error("Too many records in one submission.")
+
+        student_ids = []
+        status_by_oid = {}
+        for m in marks:
+            sid = m.get("studentId")
+            status = (m.get("status") or "").strip().lower()
+            if status not in ATTENDANCE_STATUSES:
+                return error("Attendance status must be 'present' or 'absent'.")
+            oid = to_object_id(sid)
+            if not oid:
+                return error("One of the student ids is invalid.")
+            if oid not in status_by_oid:
+                status_by_oid[oid] = status
+                student_ids.append(oid)
+
+        students_by_id = {d["_id"]: d for d in users.find(
+            {"_id": {"$in": student_ids}, "role": "student"})}
+        missing = [str(oid) for oid in student_ids if oid not in students_by_id]
+        if missing:
+            return error("One or more selected students no longer exist.")
+
+        actor_id = get_jwt_identity()
+        trainer = _trainer_doc() or {}
+        actor_name = trainer.get("fullName") or "Trainer"
+        now_ts = now()
+        inserted = updated = 0
+        for oid, status in status_by_oid.items():
+            student = students_by_id[oid]
+            cohort = student_cohort_label(student)
+            payload = {
+                "studentId": oid,
+                "date": date_str,
+                "studentName": student.get("fullName") or "—",
+                "rollNumber": student.get("rollNumber") or "—",
+                "collegeId": student.get("collegeId"),
+                "college": student.get("college") or "—",
+                "departmentId": student.get("departmentId"),
+                "department": student.get("department") or "—",
+                "cohort": cohort,
+                "status": status,
+                "markedBy": {"id": str(actor_id), "name": actor_name, "role": "trainer"},
+                "markedAt": now_ts,
+                "updatedAt": now_ts,
+            }
+            result = db.attendance.update_one(
+                {"studentId": oid, "date": date_str},
+                {"$set": payload},
+                upsert=True,
+            )
+            if result.upserted_id:
+                inserted += 1
+            else:
+                updated += 1
+
+        present = sum(1 for s in status_by_oid.values() if s == "present")
+        absent = len(status_by_oid) - present
+        log_activity(
+            db, actor_id, "trainer", "attendance_marked",
+            f"Marked attendance for {len(status_by_oid)} students on {date_str}",
+            meta={"date": date_str, "present": present, "absent": absent},
+        )
+        return ok({
+            "saved": len(status_by_oid),
+            "inserted": inserted,
+            "updated": updated,
+            "present": present,
+            "absent": absent,
+        }, message="Attendance saved.")
+
+    @bp.route("/attendance/records", methods=["GET"])
+    @role_required("trainer")
+    def trainer_list_attendance_records():
+        college_ids, err = _parse_optional_id_list(request.args.get("collegeIds"))
+        if err:
+            return error(err)
+        department_ids, err = _parse_optional_id_list(request.args.get("departmentIds"))
+        if err:
+            return error(err)
+        trainer_ids, err = _parse_optional_id_list(request.args.get("trainerIds"))
+        if err:
+            return error(err)
+        date_str = (request.args.get("date") or "").strip()
+        if not _ATTENDANCE_DATE_RE.match(date_str):
+            return error("A valid date (YYYY-MM-DD) is required.")
+
+        student_query = _attendance_student_query(db, college_ids, department_ids, [])
+        students = list(users.find(student_query).sort("fullName", 1))
+        student_ids = [d["_id"] for d in students]
+
+        record_query = {"date": date_str, "studentId": {"$in": student_ids}}
+        if trainer_ids:
+            record_query["markedBy.id"] = {"$in": [str(t) for t in trainer_ids]}
+        records = list(db.attendance.find(record_query))
+        record_by_student = {r["studentId"]: r for r in records}
+
+        rows = []
+        for student in students:
+            marked = record_by_student.get(student["_id"])
+            cohort = student_cohort_label(student)
+            rows.append({
+                "studentId": str(student["_id"]),
+                "studentName": student.get("fullName") or "—",
+                "rollNumber": student.get("rollNumber") or "—",
+                "college": student.get("college") or "—",
+                "department": student.get("department") or "—",
+                "cohort": cohort,
+                "cohortLabel": ATTENDANCE_COHORT_LABELS.get(cohort, cohort),
+                "status": marked["status"] if marked else "not_marked",
+                "markedBy": marked["markedBy"] if marked else None,
+                "markedAt": marked["markedAt"] if marked else None,
+            })
+
+        present = sum(1 for r in rows if r["status"] == "present")
+        absent = sum(1 for r in rows if r["status"] == "absent")
+        not_marked = sum(1 for r in rows if r["status"] == "not_marked")
+        return ok({
+            "records": rows,
+            "date": date_str,
+            "present": present,
+            "absent": absent,
+            "notMarked": not_marked,
+            "total": len(rows),
+        })
 
     return bp

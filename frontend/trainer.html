@@ -634,6 +634,29 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
 .ms-option input{ width:15px; height:15px; accent-color:var(--teal-dark); cursor:pointer; flex-shrink:0; }
 .ms-empty{ padding:18px 14px; text-align:center; font-size:12.5px; color:var(--text-soft); }
 
+/* ---- Attendance (Mark Attendance / View Records — mirrors Super Admin) ---- */
+.att-hub-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,300px)); gap:18px; max-width:700px; }
+.att-hub-card{ cursor:pointer; text-align:left; border:none; }
+.att-hub-card:hover{ transform:translateY(-3px); box-shadow:var(--shadow-md); }
+.att-filter-panel{ overflow:visible; }
+.att-session-note{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+.att-panel-foot{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px; border-top:1px solid var(--line); flex-wrap:wrap; }
+.att-card-grid{ display:grid; grid-template-columns:1fr; gap:12px; padding:18px; }
+.att-student-card{ background:var(--paper-raised); border:1.5px solid var(--line); border-radius:var(--radius-md); padding:14px 16px; display:flex; flex-direction:column; gap:12px; cursor:pointer; user-select:none; transition:background var(--transition), border-color var(--transition), box-shadow var(--transition); }
+.att-student-card .att-card-top{ display:flex; gap:10px; align-items:flex-start; }
+.att-student-card .att-card-meta{ display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--text-soft); min-width:0; }
+.att-student-card .att-card-meta b{ font-size:13.5px; color:var(--ink); }
+.att-student-card .att-card-badge{ margin-left:auto; flex:none; }
+.att-student-card.present{ background:rgba(251,146,60,0.10); border-color:var(--teal); box-shadow:0 0 0 3px rgba(251,146,60,0.12); }
+.att-student-card.absent{ background:rgba(228,87,61,0.10); border-color:var(--rose); box-shadow:0 0 0 3px rgba(228,87,61,0.12); }
+.att-student-card.present .att-card-meta b{ color:var(--teal-dark); }
+.att-student-card.absent .att-card-meta b{ color:var(--rose); }
+.badge-notmarked{ background:rgba(15,23,42,0.08); color:var(--text-soft); } [data-theme="dark"] .badge-notmarked{ background:rgba(255,255,255,0.08); }
+.badge-cohort-a{ background:rgba(251,146,60,0.14); color:var(--teal-dark); } [data-theme="dark"] .badge-cohort-a{ color:var(--teal); }
+.badge-cohort-b{ background:rgba(245,158,11,0.16); color:var(--amber-dark); }
+.badge-cohort-c{ background:rgba(228,87,61,0.14); color:var(--rose); }
+.badge-cohort-entry{ background:rgba(15,23,42,0.08); color:var(--text-soft); } [data-theme="dark"] .badge-cohort-entry{ background:rgba(255,255,255,0.08); }
+
 /* ---- Radio cards (quiz type) ---- */
 .radio-cards{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px; }
 .radio-card{ border:1.5px solid var(--line); border-radius:var(--radius-sm); padding:14px 16px; cursor:pointer; display:flex; align-items:flex-start; gap:10px; transition: border-color var(--transition), background var(--transition); }
@@ -965,63 +988,9 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
         </div>
       </section>
 
-      <!-- ============================================================ ATTENDANCE ============================================================ -->
+      <!-- ============================================================ ATTENDANCE (mirrors Super Admin's Mark Attendance / View Records) ============================================================ -->
       <section class="view" id="view-attendance">
-        <div class="section-head">
-          <div><h3>Attendance</h3><p class="page-intro" style="margin-bottom:0;">Mark attendance directly, or review every attendance record you've marked across your cohorts.</p></div>
-          <button class="btn btn-ghost" onclick="showToast('Exporting attendance…','⇩')">⇩ Export</button>
-        </div>
-
-        <div class="subtabs">
-          <div class="subtab active" data-atttab="mark" onclick="switchAttTab('mark')">Mark Attendance</div>
-          <div class="subtab" data-atttab="records" onclick="switchAttTab('records')">View Records</div>
-        </div>
-
-        <!-- MARK ATTENDANCE -->
-        <div class="subtab-panel active" id="attPanel-mark">
-          <div class="filter-bar" style="position:static;">
-            <select id="attCohort"><option>All Cohorts</option><option>Cohort A</option><option>Cohort B</option><option>Cohort C</option></select>
-            <div class="search-mini" style="flex:none;min-width:170px;"><span class="s-ic">📅</span><input type="date" id="attDate"></div>
-            <div class="search-mini"><span class="s-ic">⚲</span><input type="text" id="attSearch" placeholder="Search students…"></div>
-            <label class="checkbox-wrap" style="margin-left:auto;"><input type="checkbox" id="selectAllAtt"> Select all</label>
-          </div>
-
-          <div class="bulk-bar" id="bulkBar">
-            <span class="count" id="bulkCount">0 selected</span>
-            <button class="btn btn-sm btn-mini-present" onclick="bulkMark('present')">✓ Present</button>
-            <button class="btn btn-sm btn-mini-absent" onclick="bulkMark('absent')">✕ Absent</button>
-            <button class="btn btn-sm btn-mini-late" onclick="bulkMark('late')">◷ Late</button>
-            <button class="btn btn-sm btn-mini-excused" onclick="bulkMark('excused')">⌫ Excused</button>
-          </div>
-
-          <div class="table-wrap card">
-            <table>
-              <thead><tr><th style="width:34px;"></th><th>Student</th><th>Reg No.</th><th>Department</th><th>Mark</th></tr></thead>
-              <tbody id="attTbody"></tbody>
-            </table>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:18px;">
-            <span style="font-size:12.5px;color:var(--text-soft);" id="attMarkedCount">0 of 0 marked</span>
-            <button class="btn btn-primary" onclick="saveAttendance()">✓ Save Attendance</button>
-          </div>
-        </div>
-
-        <!-- VIEW RECORDS -->
-        <div class="subtab-panel" id="attPanel-records">
-          <div class="stat-band card" id="attSummaryBand"></div>
-          <div class="filter-bar" style="position:static;">
-            <select id="attRecDept"><option>All Departments</option><option>CSE</option><option>ECE</option><option>Mechanical</option><option>Civil</option><option>IT</option></select>
-            <select><option>All Cohorts</option><option>Cohort A</option><option>Cohort B</option><option>Cohort C</option></select>
-            <select><option>Last 7 days</option><option>Last 30 days</option><option>This term</option></select>
-            <div class="search-mini"><span class="s-ic">⚲</span><input type="text" id="attRecSearch" placeholder="Search records…"></div>
-          </div>
-          <div class="table-wrap card">
-            <table>
-              <thead><tr><th>Student</th><th>Reg No.</th><th>Department</th><th>Cohort</th><th>Date</th><th>Status</th></tr></thead>
-              <tbody id="attRecordsTbody"></tbody>
-            </table>
-          </div>
-        </div>
+        <div id="attendanceRoot"></div>
       </section>
 
       <!-- ============================================================ PARTICIPATION ============================================================ -->
@@ -1705,6 +1674,27 @@ tr.row-invalid td{ background:rgba(228,87,61,0.06); }
   </div>
 </div>
 
+<!-- ATTENDANCE — Mark Attendance filter modal (College / Department / Cohort / Date) -->
+<div class="modal-overlay" id="attFilterModal">
+  <div class="modal">
+    <div class="modal-head"><h3>Mark Attendance — Select Filters</h3><button class="modal-close" onclick="closeModal('attFilterModal')">✕</button></div>
+    <div class="modal-body" id="attFilterModalBody"></div>
+    <div class="modal-foot" style="justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeModal('attFilterModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="fetchAttendanceStudents()">⚲ Fetch Records</button>
+    </div>
+  </div>
+</div>
+
+<!-- ATTENDANCE — generic confirm / summary dialog (Save Attendance confirmation + success) -->
+<div class="modal-overlay" id="attConfirmModal">
+  <div class="modal">
+    <div class="modal-head"><h3 id="attConfirmTitle">Attendance Summary</h3><button class="modal-close" onclick="closeModal('attConfirmModal')">✕</button></div>
+    <div class="modal-body"><p id="attConfirmMessage" style="font-size:14px;line-height:1.6;"></p></div>
+    <div class="modal-foot" style="justify-content:flex-end;" id="attConfirmFoot"></div>
+  </div>
+</div>
+
 <div class="toast-wrap" id="toastWrap"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1756,7 +1746,7 @@ async function loadStudents(){
   if(!res.ok){
     students = [];
     studentsLoaded = false;
-    renderStudents(); renderAttendance(); renderParticipation(); renderStudentsHero();
+    renderStudents(); renderParticipation(); renderStudentsHero();
     return;
   }
   students = (res.data.students || []).map((s, i) => ({
@@ -1775,7 +1765,7 @@ async function loadStudents(){
     status: s.status || 'Active',
   }));
   studentsLoaded = true;
-  renderStudents(); renderAttendance(); renderParticipation(); renderStudentsHero();
+  renderStudents(); renderParticipation(); renderStudentsHero();
 }
 
 /* ---- All Students filter bar: college/cohort checkbox dropdowns, dept select, search ---- */
@@ -2041,6 +2031,7 @@ function switchView(name){
   document.getElementById('pageTitle').textContent = t[1];
   document.querySelectorAll('.bar-fill').forEach(b=>{ b.style.width = '0'; requestAnimationFrame(()=> b.style.width = b.dataset.w+'%'); });
   if(name==='verification') renderVerificationList();
+  if(name==='attendance') enterAttendanceView();
   if(window.innerWidth <= 1280) closeSidebar();
   window.scrollTo({top:0, behavior:'smooth'});
 }
@@ -2557,125 +2548,480 @@ function showErrorToast(msg, onRetry){
   setTimeout(()=>{ if(t.parentNode){ t.style.opacity='0'; t.style.transition='all .3s'; setTimeout(()=>t.remove(),300); } }, 6000);
 }
 
-/* ============================================================ RENDER: ATTENDANCE ============================================================ */
-const attState = {};       // id -> state, for the date currently being marked
-const attHistory = [];     // {studentId, date, status} — accumulates every saved attendance record
-
-function switchAttTab(name){
-  document.querySelectorAll('.subtab[data-atttab]').forEach(t=> t.classList.toggle('active', t.dataset.atttab===name));
-  document.getElementById('attPanel-mark').classList.toggle('active', name==='mark');
-  document.getElementById('attPanel-records').classList.toggle('active', name==='records');
-  if(name==='records') renderAttRecords();
+/* ============================================================ ATTENDANCE — REAL BACKEND CLIENT ============================================================
+   Ported 1:1 from the Super Admin "Mark Attendance" / "View Records"
+   implementation (super_admin.html), backed by the SAME db.attendance
+   collection through the trainer-scoped mirror routes in trainer.py
+   (GET /trainer/attendance/filters, GET /trainer/attendance/students,
+   POST /trainer/attendance/mark, GET /trainer/attendance/records).
+   Trainers see the exact same data Super Admin does — nothing here is
+   hardcoded or generated client-side, and no student loads until
+   "Fetch Records" is clicked. Re-marking a student on an already-marked
+   date updates that one record instead of creating a duplicate. */
+function attTodayISO(){
+  const d = new Date();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return d.getFullYear()+'-'+mm+'-'+dd;
 }
-
-function renderAttendance(){
-  const tbody = document.getElementById('attTbody');
-  if(!tbody) return;
-  // De-duplicate defensively so every student appears exactly once, even if source data ever repeats an id.
-  const seenIds = new Set();
-  const uniqueStudents = students.filter(s=> seenIds.has(s.id) ? false : (seenIds.add(s.id), true));
-  if(!uniqueStudents.length){
-    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="e-ic">✓</div>No students found.</div></td></tr>`;
-    updateMarkedCount();
-    return;
+let ATT_SUBPAGE = 'hub'; // 'hub' | 'mark' | 'records'
+let ATT_FILTERS = { loaded:false, colleges:[], departments:[], cohorts:[], trainers:[] };
+let ATT_MARK = { collegeIds:['all'], departmentIds:['all'], cohorts:['all'], deptOptions:[], date:attTodayISO(), students:[], marks:{}, fetched:false };
+let ATT_VIEW = { collegeIds:['all'], departmentIds:['all'], trainerIds:['all'], deptOptions:[], trainerOptions:[], date:attTodayISO(), records:[], summary:null, loaded:false };
+const ATT_MS_CONFIG = {
+  attMarkColleges:{ kind:'mark', field:'collegeIds', label:'College', allLabel:'All Colleges', options:()=>ATT_FILTERS.colleges.map(c=>({value:c.id,label:c.name})) },
+  attMarkDepts:{ kind:'mark', field:'departmentIds', label:'Department', allLabel:'All Departments', options:()=>ATT_MARK.deptOptions },
+  attMarkCohorts:{ kind:'mark', field:'cohorts', label:'Applicable Cohorts', allLabel:'All Cohorts', options:()=>ATT_FILTERS.cohorts },
+  attViewColleges:{ kind:'view', field:'collegeIds', label:'College', allLabel:'All Colleges', options:()=>ATT_FILTERS.colleges.map(c=>({value:c.id,label:c.name})) },
+  attViewDepts:{ kind:'view', field:'departmentIds', label:'Department', allLabel:'All Departments', options:()=>ATT_VIEW.deptOptions },
+  attViewTrainers:{ kind:'view', field:'trainerIds', label:'Trainer', allLabel:'All Trainers', options:()=>ATT_VIEW.trainerOptions },
+};
+function attMsSelected(id){ return ATT_MS_CONFIG[id] ? attStateFor(id)[ATT_MS_CONFIG[id].field] : []; }
+function attStateFor(id){ return ATT_MS_CONFIG[id] && ATT_MS_CONFIG[id].kind==='view' ? ATT_VIEW : ATT_MARK; }
+function attMsControl(id){
+  const cfg = ATT_MS_CONFIG[id];
+  if(!cfg) return '';
+  const sel = attMsSelected(id);
+  return `
+  <div class="ms" id="${id}">
+    <label class="ms-label">${cfg.label}</label>
+    <div class="ms-trigger" id="${id}Trigger" onclick="attTogglePanel(event,'${id}')">
+      <span class="ms-placeholder" id="${id}Placeholder">${sel.includes('all')?cfg.allLabel:(sel.length+' selected')}</span>
+      <span class="ms-caret">▾</span>
+    </div>
+    <div class="ms-panel" id="${id}Panel">
+      <div class="ms-options" id="${id}Options" onclick="event.stopPropagation()"></div>
+    </div>
+  </div>`;
+}
+function attTogglePanel(e, id){
+  e.stopPropagation();
+  const panel = document.getElementById(id+'Panel');
+  const trigger = document.getElementById(id+'Trigger');
+  const willOpen = panel && !panel.classList.contains('open');
+  document.querySelectorAll('.ms-panel.open').forEach(p=>p.classList.remove('open'));
+  document.querySelectorAll('.ms-trigger.open').forEach(t=>t.classList.remove('open'));
+  if(willOpen && panel){ panel.classList.add('open'); trigger.classList.add('open'); attRenderOptions(id); }
+}
+document.addEventListener('click', ()=>{
+  document.querySelectorAll('.ms-panel.open').forEach(p=>p.classList.remove('open'));
+  document.querySelectorAll('.ms-trigger.open').forEach(t=>t.classList.remove('open'));
+});
+function attRenderOptions(id){
+  const cfg = ATT_MS_CONFIG[id];
+  const wrap = document.getElementById(id+'Options');
+  if(!cfg || !wrap) return;
+  // The backend cohorts list ships a literal {value:'all'} row; the generic
+  // "Select All" row below already covers that state, so drop it here to
+  // avoid a duplicate checkbox.
+  const options = cfg.options().filter(o => o.value !== 'all');
+  const sel = attMsSelected(id);
+  const allOn = sel.includes('all');
+  wrap.innerHTML = options.length
+    ? `<label class="ms-selectall" onclick="event.stopPropagation()"><input type="checkbox" value="all" ${allOn?'checked':''} onchange="attToggleOption('${id}','all',this.checked)"> ${esc(cfg.allLabel)}</label>` +
+      options.map(o=>`
+        <label class="ms-option"><input type="checkbox" value="${esc(o.value)}" ${sel.includes(o.value)?'checked':''} onchange="attToggleOption('${id}','${esc(o.value)}',this.checked)"> ${esc(o.label)}</label>
+      `).join('')
+    : `<div class="ms-empty">No options available.</div>`;
+}
+function attToggleOption(id, value, checked){
+  const cfg = ATT_MS_CONFIG[id];
+  if(!cfg) return;
+  const field = attStateFor(id)[cfg.field];
+  if(value === 'all'){
+    if(checked){
+      field.length = 0;
+      field.push('all');
+    } else {
+      const i = field.indexOf('all'); if(i!==-1) field.splice(i,1);
+      if(!field.length) field.push('all');
+    }
+  } else {
+    if(checked){
+      const i = field.indexOf('all'); if(i!==-1) field.splice(i,1);
+      if(!field.includes(value)) field.push(value);
+    } else {
+      const i = field.indexOf(value); if(i!==-1) field.splice(i,1);
+    }
+    if(!field.length) field.push('all');
   }
-  tbody.innerHTML = uniqueStudents.map(s=>`
-    <tr data-id="${s.id}">
-      <td><input type="checkbox" class="att-check" data-id="${s.id}"></td>
-      <td><div class="row-person"><div class="row-avatar">${initials(s.name)}</div><div><div class="row-name">${s.name}</div></div></div></td>
-      <td>${s.roll}</td>
-      <td>${s.dept}</td>
-      <td><div class="att-actions">
-        <button class="att-btn" data-state="present" onclick="markOne(${s.id},'present',this)" title="Present">✓ Present</button>
-        <button class="att-btn" data-state="absent" onclick="markOne(${s.id},'absent',this)" title="Absent">✕ Absent</button>
-        <button class="att-btn" data-state="late" onclick="markOne(${s.id},'late',this)" title="Late">◷ Late</button>
-      </div></td>
-    </tr>`).join('');
-  document.querySelectorAll('.att-check').forEach(c=> c.addEventListener('change', updateBulkBar));
-  updateMarkedCount();
+  attRenderOptions(id);
+  attUpdateTrigger(id);
+  if(cfg.field === 'collegeIds') attSyncDepts(cfg.kind);
 }
-const attStatusLabel = { present:'Present', absent:'Absent', late:'Late', excused:'Excused' };
-const attStatusBadgeClass = { present:'badge-present', absent:'badge-absent', late:'badge-late', excused:'badge-excused' };
-function markOne(id, state, btn){
-  attState[id] = state;
-  const row = btn.closest('tr');
-  row.querySelectorAll('.att-btn').forEach(b=> b.classList.remove('on-present','on-absent','on-late','on-excused'));
-  btn.classList.add('on-'+state);
-  updateMarkedCount();
+function attUpdateTrigger(id){
+  const cfg = ATT_MS_CONFIG[id];
+  const ph = document.getElementById(id+'Placeholder');
+  if(!cfg || !ph) return;
+  ph.textContent = attMsSelected(id).includes('all') ? cfg.allLabel : (attMsSelected(id).length + ' selected');
 }
-function updateMarkedCount(){
-  const total = students.length;
-  const marked = Object.keys(attState).length;
-  const el = document.getElementById('attMarkedCount');
-  if(el) el.textContent = `${marked} of ${total} marked`;
+function attSyncDepts(kind){
+  const state = kind==='view' ? ATT_VIEW : ATT_MARK;
+  const allColleges = state.collegeIds.includes('all') || !state.collegeIds.length;
+  state.deptOptions = ATT_FILTERS.departments
+    .filter(d => allColleges || state.collegeIds.includes(d.collegeId))
+    .map(d => ({ value:d.id, label:d.name }));
+  state.departmentIds = ['all'];
+  const deptId = kind==='view' ? 'attViewDepts' : 'attMarkDepts';
+  attUpdateTrigger(deptId);
+  attRenderOptions(deptId);
 }
-function updateBulkBar(){
-  const checked = document.querySelectorAll('.att-check:checked');
-  const bar = document.getElementById('bulkBar');
-  bar.classList.toggle('show', checked.length>0);
-  document.getElementById('bulkCount').textContent = checked.length + ' selected';
+function attCohortBadgeClass(cohort){
+  return { A:'badge-cohort-a', B:'badge-cohort-b', C:'badge-cohort-c', entry_level:'badge-cohort-entry' }[cohort] || 'badge-cohort-entry';
 }
-function bulkMark(state){
-  document.querySelectorAll('.att-check:checked').forEach(c=>{
-    const row = c.closest('tr');
-    const btn = row.querySelector(`.att-btn[data-state="${state}"]`);
-    if(btn) markOne(c.dataset.id, state, btn);
-  });
-  showToast(`Marked ${document.querySelectorAll('.att-check:checked').length} students as ${state}`, '✓');
-}
-document.getElementById('selectAllAtt').addEventListener('change', function(){
-  document.querySelectorAll('.att-check').forEach(c=> c.checked = this.checked);
-  updateBulkBar();
-});
-document.getElementById('attSearch').addEventListener('input', function(){
-  const q = this.value.toLowerCase();
-  document.querySelectorAll('#attTbody tr').forEach(r=>{
-    r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
-  });
-});
-function saveAttendance(){
-  const marked = Object.keys(attState).length;
-  if(!marked){ showToast('Mark at least one student before saving', '✕'); return; }
-  const date = document.getElementById('attDate').value || new Date().toISOString().slice(0,10);
-  Object.entries(attState).forEach(([id, status])=>{
-    attHistory.unshift({ studentId: parseInt(id), date, status });
-  });
-  showToast(`Attendance saved for ${marked} students`, '✓');
-  renderAttRecords();
+function attStatusBadge(status){
+  if(status === 'present') return `<span class="badge badge-present">Present</span>`;
+  if(status === 'absent') return `<span class="badge badge-absent">Absent</span>`;
+  return `<span class="badge badge-notmarked">Not Yet Marked</span>`;
 }
 
-/* ---- View Records tab ---- */
-function renderAttRecords(){
-  const wrap = document.getElementById('attSummaryBand');
-  const counts = { present:0, absent:0, late:0, excused:0 };
-  attHistory.forEach(r=>{ if(counts[r.status]!==undefined) counts[r.status]++; });
-  const items = [
-    {label:'Total Records', value: attHistory.length, ic:'▤', cls:'ic-ink'},
-    {label:'Present', value: counts.present, ic:'✓', cls:'ic-teal'},
-    {label:'Absent', value: counts.absent, ic:'✕', cls:'ic-rose'},
-    {label:'Late', value: counts.late, ic:'◷', cls:'ic-amber'}
+/* ---- Attendance filter data (DB-backed, GET /trainer/attendance/filters) ---- */
+async function loadAttendanceFilters(){
+  const res = await trainerApi('/attendance/filters');
+  if(!res.ok){ showToast(res.data?.message || 'Could not load attendance filters.', '✕'); return false; }
+  ATT_FILTERS.colleges = res.data.colleges || [];
+  ATT_FILTERS.departments = res.data.departments || [];
+  ATT_FILTERS.cohorts = res.data.cohorts || [];
+  ATT_FILTERS.trainers = res.data.trainers || [];
+  ATT_VIEW.trainerOptions = [{value:'super_admin', label:'Super Admin'}].concat(ATT_FILTERS.trainers.map(t=>({value:t.id, label:t.name})));
+  ATT_FILTERS.loaded = true;
+  attSyncDepts('mark');
+  attSyncDepts('view');
+  return true;
+}
+async function enterAttendanceView(){
+  renderAttendanceRoot();
+  if(!ATT_FILTERS.loaded){ await loadAttendanceFilters(); renderAttendanceRoot(); }
+}
+function renderAttendanceRoot(){
+  const root = document.getElementById('attendanceRoot');
+  if(!root) return;
+  const fns = { hub: attPageHub, mark: attPageMark, records: attPageView };
+  root.innerHTML = (fns[ATT_SUBPAGE] || attPageHub)();
+}
+function attGoHub(){ ATT_SUBPAGE = 'hub'; renderAttendanceRoot(); }
+
+/* ---- Hub: two cards, same as Super Admin's Attendance landing page ---- */
+function attPageHub(){
+  return `
+  <div class="section-head">
+    <div><h3>Attendance</h3><p class="page-intro" style="margin-bottom:0;">Manage and review student attendance across all colleges.</p></div>
+  </div>
+  <div class="att-hub-grid">
+    <div class="card report-card att-hub-card" onclick="attOpenFilterModal()">
+      <div class="r-ic">✓</div>
+      <div><h4 style="font-size:16px;">Attendance</h4><p style="color:var(--text-soft);font-size:13px;">Manage and mark student attendance.</p></div>
+      <button class="btn btn-primary btn-sm" style="align-self:flex-start;">Mark Attendance</button>
+    </div>
+    <div class="card report-card att-hub-card" onclick="attGoRecordsPage()">
+      <div class="r-ic">▤</div>
+      <div><h4 style="font-size:16px;">Attendance Records</h4><p style="color:var(--text-soft);font-size:13px;">View previously marked attendance.</p></div>
+      <button class="btn btn-primary btn-sm" style="align-self:flex-start;">View Records</button>
+    </div>
+  </div>`;
+}
+
+/* ---- Mark Attendance: filter modal → Fetch Records → cards page ----
+   Clicking the Attendance card opens a filter dialog (College / Department /
+   Cohort / Date). Fetch Records loads the matching students onto the
+   dedicated attendance page, where every student is a full-width card that
+   toggles green (Present) <-> red (Absent) on click. */
+async function attOpenFilterModal(){
+  if(!ATT_FILTERS.loaded){
+    const loaded = await loadAttendanceFilters();
+    if(!loaded) return;
+  }
+  const body = document.getElementById('attFilterModalBody');
+  body.innerHTML = `
+    <div class="row-2">
+      <div>${attMsControl('attMarkColleges')}</div>
+      <div>${attMsControl('attMarkDepts')}</div>
+    </div>
+    <div class="row-2">
+      <div>${attMsControl('attMarkCohorts')}</div>
+      <div><label class="ms-label">Date</label><input type="date" id="attMarkDate" style="width:100%;padding:9px 12px;font-size:13px;border:1.5px solid var(--line);border-radius:var(--radius-sm);background:var(--paper);font-family:inherit;" value="${ATT_MARK.date}"></div>
+    </div>
+    <p style="font-size:12.5px;color:var(--text-soft);margin:12px 0 0;">Select the filters, then Fetch Records to open the attendance page for those students.</p>`;
+  openModal('attFilterModal');
+}
+async function fetchAttendanceStudents(){
+  const m = ATT_MARK;
+  const dateEl = document.getElementById('attMarkDate');
+  if(dateEl && dateEl.value) m.date = dateEl.value;
+  const qs = new URLSearchParams();
+  if(m.collegeIds.length && !m.collegeIds.includes('all')) qs.set('collegeIds', m.collegeIds.join(','));
+  if(m.departmentIds.length && !m.departmentIds.includes('all')) qs.set('departmentIds', m.departmentIds.join(','));
+  if(m.cohorts.length && !m.cohorts.includes('all')) qs.set('cohorts', m.cohorts.join(','));
+  const res = await trainerApi('/attendance/students?' + qs.toString());
+  if(res.ok){
+    m.students = res.data.students || [];
+    m.marks = {};
+    m.students.forEach(s=>{ m.marks[s.id] = 'present'; });
+    m.fetched = true;
+    // Preload any attendance already saved for the selected date so
+    // re-opening Mark Attendance on a previous day doesn't blank it out.
+    const rqs = new URLSearchParams();
+    if(m.collegeIds.length && !m.collegeIds.includes('all')) rqs.set('collegeIds', m.collegeIds.join(','));
+    if(m.departmentIds.length && !m.departmentIds.includes('all')) rqs.set('departmentIds', m.departmentIds.join(','));
+    rqs.set('date', m.date);
+    const rres = await trainerApi('/attendance/records?' + rqs.toString());
+    if(rres.ok){
+      (rres.data.records || []).forEach(r => {
+        if(r.status === 'present' || r.status === 'absent') m.marks[r.studentId] = r.status;
+      });
+    }
+  } else {
+    showToast(res.data?.message || 'Could not load students.', '✕');
+    m.fetched = false;
+  }
+  closeModal('attFilterModal');
+  ATT_SUBPAGE = 'mark';
+  renderAttendanceRoot();
+}
+function attFilterSummary(){
+  const m = ATT_MARK;
+  const cols = m.collegeIds.filter(x=>x!=='all');
+  const depts = m.departmentIds.filter(x=>x!=='all');
+  const cohorts = m.cohorts.filter(x=>x!=='all');
+  const collegeNames = ATT_FILTERS.colleges.filter(c=>cols.includes(c.id)).map(c=>c.name).join(', ');
+  const deptNames = ATT_FILTERS.departments.filter(d=>depts.includes(d.id)).map(d=>d.name).join(', ');
+  const cohortNames = cohorts.map(c=>(ATT_FILTERS.cohorts.find(x=>x.value===c)||{label:c}).label).join(', ');
+  return [
+    (cols.length ? 'College: ' + collegeNames : 'College: All Colleges'),
+    (depts.length ? 'Department: ' + deptNames : 'Department: All Departments'),
+    (cohorts.length ? 'Cohort: ' + cohortNames : 'Cohort: All Cohorts'),
   ];
-  if(wrap) wrap.innerHTML = items.map(it=>`
-    <div class="stat-band-item">
-      <div class="sb-top"><div class="sb-ic ${it.cls}">${it.ic}</div><div class="sb-label">${it.label}</div></div>
-      <div class="sb-value">${it.value}</div>
-    </div>`).join('');
+}
+function attPageMark(){
+  const m = ATT_MARK;
+  return `
+  <div class="section-head">
+    <div><p class="page-intro" style="margin-bottom:0;">Fetch the students matching the selected filters, then mark each one Present or Absent. The whole card turns green for Present and red for Absent.</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-ghost btn-sm" onclick="attOpenFilterModal()">⛭ Change Filters</button>
+      <button class="btn btn-ghost btn-sm" onclick="attGoHub()">← Back to Attendance</button>
+    </div>
+  </div>
+  ${m.fetched ? '' : `
+  <div class="card att-filter-panel">
+    <div style="padding:18px;">
+      <div class="att-session-note">
+        ${attFilterSummary().map(c=>`<span class="badge badge-draft">${esc(c)}</span>`).join('')}
+        <span style="font-family:var(--font-mono);font-size:12px;color:var(--text-soft);">Date: ${esc(m.date||'—')}</span>
+      </div>
+    </div>
+    <div class="att-panel-foot">
+      <span style="font-family:var(--font-mono);font-size:12px;color:var(--text-soft);" id="attMarkHint">No records loaded yet — click Fetch Records</span>
+      <button class="btn btn-accent btn-sm" onclick="attOpenFilterModal()">⚲ Fetch Records</button>
+    </div>
+  </div>`}
+  ${m.fetched ? attMarkCards() : ''}`;
+}
+function attMarkCards(){
+  const m = ATT_MARK;
+  const total = m.students.length;
+  const counts = attMarkCounts(m);
+  return `
+  <div class="card">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--line);font-weight:700;">${total} student(s)</div>
+    ${total ? `<div class="att-card-grid">${m.students.map(attCard).join('')}</div>` : `<div class="empty-state"><div class="e-ic">✓</div>No students match the selected filters.</div>`}
+    <div class="att-panel-foot">
+      <span style="font-family:var(--font-mono);font-size:12px;color:var(--text-soft);" id="attMarkCount">${counts.present} present · ${counts.absent} absent</span>
+      <button class="btn btn-accent btn-sm" onclick="attSaveAttendance()">✓ Save Attendance</button>
+    </div>
+  </div>`;
+}
+function attMarkCounts(m){
+  let present = 0, absent = 0;
+  m.students.forEach(s=>{ if((m.marks[s.id]||'present') === 'absent') absent++; else present++; });
+  return { present, absent };
+}
+function attCard(s){
+  const state = ATT_MARK.marks[s.id] || 'present';
+  return `
+  <div class="att-student-card ${state}" id="attCard-${esc(s.id)}" onclick="attToggleCard('${esc(s.id)}')" title="Click to toggle Present / Absent">
+    <div class="att-card-top">
+      <div class="row-avatar">${initials(s.name)}</div>
+      <div class="att-card-meta">
+        <b>${esc(s.name)}</b>
+        <span>Roll: ${esc(s.rollNumber)}</span>
+        <span>${esc(s.college)} · ${esc(s.department)}</span>
+        <span class="badge ${attCohortBadgeClass(s.cohort)}" style="align-self:flex-start;margin-top:2px;">${esc(s.cohortLabel)}</span>
+      </div>
+      <div class="att-card-badge">${attStatusBadge(state)}</div>
+    </div>
+  </div>`;
+}
+function attToggleCard(sid){
+  const next = (ATT_MARK.marks[sid] === 'absent') ? 'present' : 'absent';
+  ATT_MARK.marks[sid] = next;
+  const card = document.getElementById('attCard-'+sid);
+  if(card){
+    card.classList.remove('present','absent');
+    card.classList.add(next);
+    const badge = card.querySelector('.att-card-badge');
+    if(badge) badge.innerHTML = attStatusBadge(next);
+  }
+  const cnt = document.getElementById('attMarkCount');
+  if(cnt){
+    const c = attMarkCounts(ATT_MARK);
+    cnt.textContent = `${c.present} present · ${c.absent} absent`;
+  }
+}
+function attSaveAttendance(){
+  const m = ATT_MARK;
+  const ids = Object.keys(m.marks);
+  if(!ids.length){ showToast('Mark at least one student first', '✕'); return; }
+  const counts = { present:0, absent:0 };
+  ids.forEach(sid => counts[m.marks[sid]] = (counts[m.marks[sid]]||0) + 1);
+  const marks = ids.map(studentId => ({ studentId, status:m.marks[studentId] }));
+  document.getElementById('attConfirmTitle').textContent = 'Attendance Summary';
+  document.getElementById('attConfirmMessage').innerHTML =
+    `Save attendance for <b>${ids.length} students</b> on <b>${esc(m.date)}</b>?<br>` +
+    `<span style="color:var(--teal-dark);font-weight:700;">${counts.present||0} present</span> · ` +
+    `<span style="color:var(--rose);font-weight:700;">${counts.absent||0} absent</span>`;
+  document.getElementById('attConfirmFoot').innerHTML =
+    `<button class="btn btn-ghost" onclick="closeModal('attConfirmModal')">Cancel</button>` +
+    `<button class="btn btn-primary" onclick="attConfirmSave()">✓ Save Attendance</button>`;
+  openModal('attConfirmModal');
+}
+async function attConfirmSave(){
+  const m = ATT_MARK;
+  const ids = Object.keys(m.marks);
+  const marks = ids.map(studentId => ({ studentId, status:m.marks[studentId] }));
+  const res = await trainerApi('/attendance/mark', { method:'POST', body:{ date:m.date, marks } });
+  if(res.ok){
+    const present = res.data.present != null ? res.data.present : 0;
+    const absent = res.data.absent != null ? res.data.absent : 0;
+    const total = res.data.saved != null ? res.data.saved : (present + absent);
+    document.getElementById('attConfirmTitle').textContent = 'Attendance Saved Successfully';
+    document.getElementById('attConfirmMessage').innerHTML =
+      `Present: <b style="color:var(--teal-dark);">${present}</b><br>Absent: <b style="color:var(--rose);">${absent}</b><br>Total: <b>${total}</b>`;
+    document.getElementById('attConfirmFoot').innerHTML =
+      `<button class="btn btn-primary" onclick="closeModal('attConfirmModal')">Done</button>`;
+    ATT_MARK.marks = {};
+    ATT_MARK.fetched = false;
+    ATT_MARK.students = [];
+  } else {
+    closeModal('attConfirmModal');
+    showToast(res.data?.message || 'Could not save attendance.', '✕');
+  }
+}
 
-  const tbody = document.getElementById('attRecordsTbody');
-  if(!tbody) return;
-  const rows = attHistory;
-  tbody.innerHTML = rows.map(r=>{
-    const s = students.find(x=>x.id===r.studentId);
-    if(!s) return '';
-    return `<tr>
-      <td><div class="row-person"><div class="row-avatar">${initials(s.name)}</div><div><div class="row-name">${s.name}</div></div></div></td>
-      <td>${s.roll}</td>
-      <td>${s.dept}</td>
-      <td>${s.cohort}</td>
-      <td>${r.date}</td>
-      <td><span class="badge ${attStatusBadgeClass[r.status]}">${attStatusLabel[r.status]}</span></td>
-    </tr>`;
-  }).join('') || `<tr><td colspan="6"><div class="empty-state"><div class="e-ic">✓</div>No attendance records yet.</div></td></tr>`;
+/* ---- View Records (full page) ---- */
+function attGoRecordsPage(){ ATT_SUBPAGE = 'records'; renderAttendanceRoot(); }
+function attPageView(){
+  const v = ATT_VIEW;
+  return `
+  <div class="section-head">
+    <div><p class="page-intro" style="margin-bottom:0;">Attendance records for the selected date. Students with no mark on that date are shown as Not Yet Marked.</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-ghost btn-sm" onclick="attGoHub()">← Back to Attendance</button>
+      <button class="btn btn-ghost btn-sm" onclick="attExportExcel()">⇩ Export to Excel</button>
+      <button class="btn btn-ghost btn-sm" onclick="attPrint()">⎙ Print / PDF</button>
+    </div>
+  </div>
+  <div class="card att-filter-panel">
+    <div style="padding:18px;">
+      <div class="row-4">
+        ${attMsControl('attViewColleges')}
+        ${attMsControl('attViewDepts')}
+        ${attMsControl('attViewTrainers')}
+        <div><label class="ms-label">Date</label><input type="date" id="attViewDate" style="width:100%;padding:9px 12px;font-size:13px;border:1.5px solid var(--line);border-radius:var(--radius-sm);background:var(--paper);font-family:inherit;" value="${v.date}"></div>
+      </div>
+    </div>
+    <div class="att-panel-foot">
+      <span style="font-family:var(--font-mono);font-size:12px;color:var(--text-soft);" id="attViewStatus">${v.loaded ? v.records.length+' student(s) for '+v.date : 'Choose filters and click Apply Filters'}</span>
+      <button class="btn btn-accent btn-sm" onclick="loadAttendanceRecords()">⚲ Apply Filters</button>
+    </div>
+  </div>
+  ${v.loaded ? attViewResults(v) : ''}`;
+}
+function attViewResults(v){
+  const rows = v.records;
+  const summary = v.summary || {};
+  return `
+  <div class="stat-band card" style="margin:18px 0;">
+    <div class="stat-band-item"><div class="sb-top"><div class="sb-ic" style="background:rgba(251,146,60,0.14);color:var(--teal-dark);">✓</div><div class="sb-label">Present</div></div><div class="sb-value">${summary.present||0}</div></div>
+    <div class="stat-band-item"><div class="sb-top"><div class="sb-ic" style="background:rgba(228,87,61,0.14);color:var(--rose);">✕</div><div class="sb-label">Absent</div></div><div class="sb-value">${summary.absent||0}</div></div>
+    <div class="stat-band-item"><div class="sb-top"><div class="sb-ic" style="background:rgba(15,23,42,0.08);color:var(--text-soft);">◌</div><div class="sb-label">Not Yet Marked</div></div><div class="sb-value">${summary.notMarked||0}</div></div>
+    <div class="stat-band-item"><div class="sb-top"><div class="sb-ic" style="background:rgba(245,158,11,0.16);color:var(--amber-dark);">Σ</div><div class="sb-label">Total Students</div></div><div class="sb-value">${summary.total||0}</div></div>
+  </div>
+  <div class="table-wrap card">
+    <table>
+      <thead><tr><th>Student</th><th>Roll Number</th><th>College</th><th>Department</th><th>Current Cohort</th><th>Marked By</th><th>Status</th></tr></thead>
+      <tbody>
+        ${rows.length ? rows.map(r=>`
+          <tr>
+            <td><div class="row-person"><div class="row-avatar">${initials(r.studentName)}</div><div><div class="row-name">${esc(r.studentName)}</div></div></div></td>
+            <td>${esc(r.rollNumber)}</td>
+            <td>${esc(r.college)}</td>
+            <td>${esc(r.department)}</td>
+            <td><span class="badge ${attCohortBadgeClass(r.cohort)}">${esc(r.cohortLabel)}</span></td>
+            <td>${r.markedBy ? esc(r.markedBy.name) : '—'}</td>
+            <td>${attStatusBadge(r.status)}</td>
+          </tr>`).join('') : `<tr><td colspan="7"><div class="empty-state"><div class="e-ic">✓</div>No students found for the selected filters.</div></td></tr>`}
+      </tbody>
+    </table>
+  </div>`;
+}
+async function loadAttendanceRecords(){
+  const v = ATT_VIEW;
+  const dateEl = document.getElementById('attViewDate');
+  if(dateEl && dateEl.value) v.date = dateEl.value;
+  const qs = new URLSearchParams();
+  if(v.collegeIds.length && !v.collegeIds.includes('all')) qs.set('collegeIds', v.collegeIds.join(','));
+  if(v.departmentIds.length && !v.departmentIds.includes('all')) qs.set('departmentIds', v.departmentIds.join(','));
+  if(v.trainerIds.length && !v.trainerIds.includes('all')) qs.set('trainerIds', v.trainerIds.join(','));
+  qs.set('date', v.date);
+  const res = await trainerApi('/attendance/records?' + qs.toString());
+  if(res.ok){
+    ATT_VIEW.records = res.data.records || [];
+    ATT_VIEW.summary = res.data;
+    ATT_VIEW.loaded = true;
+  } else {
+    showToast(res.data?.message || 'Could not load attendance records.', '✕');
+    ATT_VIEW.loaded = false;
+  }
+  renderAttendanceRoot();
+}
+function attExportExcel(){
+  if(!ATT_VIEW.records.length){ showToast('No records to export.', '✕'); return; }
+  const rows = ATT_VIEW.records.map(r => ({
+    'Student Name': r.studentName,
+    'Roll Number': r.rollNumber,
+    'College': r.college,
+    'Department': r.department,
+    'Current Cohort': r.cohortLabel,
+    'Marked By': r.markedBy ? r.markedBy.name : '—',
+    'Status': (r.status==='not_marked' ? 'Not Yet Marked' : (r.status.charAt(0).toUpperCase()+r.status.slice(1))),
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Attendance ' + ATT_VIEW.date);
+  XLSX.writeFile(wb, 'attendance-records-'+ATT_VIEW.date+'.xlsx');
+  showToast('Attendance export downloaded', '⇩');
+}
+function attPrint(){
+  if(!ATT_VIEW.records.length){ showToast('No records to print.', '✕'); return; }
+  const columns = ['Student Name','Roll Number','College','Department','Current Cohort','Marked By','Status'];
+  const rows = ATT_VIEW.records.map(r => [
+    r.studentName, r.rollNumber, r.college, r.department, r.cohortLabel,
+    r.markedBy ? r.markedBy.name : '—',
+    r.status==='not_marked' ? 'Not Yet Marked' : (r.status.charAt(0).toUpperCase()+r.status.slice(1)),
+  ]);
+  const win = window.open('', '_blank');
+  win.document.write(`<html><head><title>Attendance Records</title><style>
+    body{font-family:Arial,sans-serif;padding:24px;color:#0F172A;} h1{font-size:18px;margin:0;} p{color:#64748B;font-size:12px;}
+    table{width:100%;border-collapse:collapse;margin-top:14px;} th,td{border:1px solid #F3F4F6;padding:6px 8px;font-size:12px;text-align:left;}
+    th{background:#FFFCF8;} .present{color:#C2410C;font-weight:700;} .absent{color:#E4573D;font-weight:700;} .not{color:#64748B;}
+    </style></head><body>
+    <h1>Attendance Records</h1><p>Date: ${esc(ATT_VIEW.date)} · EIP · Generated ${esc(new Date().toLocaleString())}</p>
+    <table><thead><tr>${columns.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${i===6?(c==='Present'?'present':c==='Absent'?'absent':'not'):''}">${esc(String(c))}</td>`).join('')}</tr>`).join('')}</tbody></table>
+    </body></html>`);
+  win.document.close(); win.focus();
+  setTimeout(()=>win.print(), 300);
 }
 
 /* ============================================================ QUIZ RESULTS / INTERVIEW VERIFICATION / VALIDATION VERIFICATION (Create Quiz — Marks Management, live from backend) ============================================================
@@ -4403,8 +4749,6 @@ document.querySelectorAll('.field select').forEach(sel=>{
 /* ============================================================ INIT ============================================================ */
 window.addEventListener('load', ()=>{
   document.getElementById('loader').classList.add('hidden');
-  const attDateEl = document.getElementById('attDate');
-  if(attDateEl && !attDateEl.value) attDateEl.value = new Date().toISOString().slice(0,10);
   document.querySelectorAll('.bar-fill').forEach(b=> setTimeout(()=> b.style.width = b.dataset.w+'%', 200));
   document.querySelectorAll('.ring-fill').forEach(r=>{
     const circumference = 2 * Math.PI * 70;

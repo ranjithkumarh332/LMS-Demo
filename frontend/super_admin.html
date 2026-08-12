@@ -926,11 +926,21 @@ function fmtRegDate(iso){
   return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
 }
 
-/* ---- Super Admin 24-hour time formatting ----
+/* ---- Super Admin IST time formatting ----
    This dashboard is exclusive to the Super Admin role, so every time value
-   shown here is forced to the standard HH:mm 24-hour format (never 12-hour
-   AM/PM). Centralized in these two helpers so every page/table/modal/report
-   uses the same formatting and no other role's dashboard is affected. */
+   shown here is forced to India Standard Time (Asia/Kolkata) in 24-hour
+   railway format — never 12-hour AM/PM, never the browser's local
+   timezone, never UTC. `timeZone:'Asia/Kolkata'` is passed explicitly on
+   every call below so the display is correct regardless of what timezone
+   the admin's machine/browser happens to be set to. Centralized in these
+   helpers so every page/table/modal/report/PDF/CSV uses the same
+   formatting and no other role's dashboard is affected. */
+function saIstParts(d){
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', day:'2-digit', month:'2-digit', year:'numeric',
+    hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false,
+  }).formatToParts(d).reduce((acc,p)=>{ acc[p.type]=p.value; return acc; }, {});
+}
 function saFmtTime(v){
   if(v == null || v === '') return '—';
   let d = v instanceof Date ? v : new Date(v);
@@ -944,13 +954,24 @@ function saFmtTime(v){
     if(ap === 'AM' && hh === 12) hh = 0;
     return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
   }
-  return d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit', hour12:false });
+  const p = saIstParts(d);
+  const hh = p.hour === '24' ? '00' : p.hour;
+  return `${hh}:${p.minute}`;
+}
+function saFmtDate(v){
+  if(v == null || v === '') return '—';
+  const d = v instanceof Date ? v : new Date(v);
+  if(isNaN(d.getTime())) return '—';
+  const p = saIstParts(d);
+  return `${p.day}/${p.month}/${p.year}`;
 }
 function saFmtDateTime(v){
   if(v == null || v === '') return '—';
   const d = v instanceof Date ? v : new Date(v);
   if(isNaN(d.getTime())) return '—';
-  return d.toLocaleString(undefined, { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false });
+  const p = saIstParts(d);
+  const hh = p.hour === '24' ? '00' : p.hour;
+  return `${p.day}/${p.month}/${p.year} ${hh}:${p.minute}:${p.second}`;
 }
 
 // Approval stats used to drive sidebar counts (and, on the dashboard KPI
@@ -1573,8 +1594,7 @@ function formatLastLogin(iso){
   if(!iso) return '-';
   const d = new Date(iso);
   if(isNaN(d.getTime())) return '-';
-  return d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}) + ' ' +
-         saFmtTime(d);
+  return saFmtDate(d) + ' ' + saFmtTime(d);
 }
 let USERS = [];
 async function loadUsersAdmin(){
@@ -4677,6 +4697,18 @@ function overallReportFiltered(){
     return hay.includes(q);
   });
 }
+// Builds the Overall Report export URL from whatever is currently selected
+// on screen (Department dropdown + search box), so Download always matches
+// what the admin is looking at instead of silently exporting every record.
+function overallReportExportEndpoint(){
+  const q = (document.getElementById('overallReportSearch')?.value||'').trim();
+  const dept = document.getElementById('overallDeptFilter')?.value || 'all';
+  const params = new URLSearchParams();
+  if(dept && dept !== 'all') params.set('department', dept);
+  if(q) params.set('q', q);
+  const qs = params.toString();
+  return '/admin/reports/overall/export' + (qs ? '?' + qs : '');
+}
 async function loadOverallReport(){
   const tbody = document.getElementById('overallReportBody');
   if(!tbody) return;
@@ -4748,14 +4780,14 @@ function pageAudit(){
     <thead><tr><th>Time</th><th>User</th><th>Role</th><th>Action</th><th>Description</th></tr></thead>
     <tbody>${AUDIT_LOGS.map(a=>{
       const dot = (a.action||'').toLowerCase().includes('delet')?'var(--rose)':(a.action||'').toLowerCase().includes('reject')?'var(--rose)':(a.action||'').toLowerCase().includes('suspend')?'var(--amber)':'var(--teal)';
-      return `<tr data-search="${esc((((a.actorName||'')+' '+(a.action||'')+' '+(a.description||'')).toLowerCase()))}"><td class="mono">${esc((a.createdAt||'').replace('T',' ').slice(0,16))}</td><td class="row-title">${esc(a.actorName || a.actorRoleLabel || '—')}</td><td>${esc(a.actorRoleLabel || a.actorRole || '—')}</td><td><span class="audit-action"><span class="audit-dot" style="background:${dot}"></span>${esc((a.action||'').replace(/_/g,' '))}</span></td><td>${esc(a.description||'—')}</td></tr>`;
+      return `<tr data-search="${esc((((a.actorName||'')+' '+(a.action||'')+' '+(a.description||'')).toLowerCase()))}"><td class="mono">${esc(a.createdAtIST || '—')}</td><td class="row-title">${esc(a.actorName || a.actorRoleLabel || '—')}</td><td>${esc(a.actorRoleLabel || a.actorRole || '—')}</td><td><span class="audit-action"><span class="audit-dot" style="background:${dot}"></span>${esc((a.action||'').replace(/_/g,' '))}</span></td><td>${esc(a.description||'—')}</td></tr>`;
     }).join('')}</tbody>
   </table></div></div></div>`;
 }
 function exportAuditCSV(){
   const rows = [['Time','User','Role','Action','Description']];
   AUDIT_LOGS.forEach(a=>rows.push([
-    (a.createdAt||'').replace('T',' ').slice(0,16), a.actorName||a.actorRoleLabel||'', a.actorRoleLabel||a.actorRole||'',
+    a.createdAtIST || '', a.actorName||a.actorRoleLabel||'', a.actorRoleLabel||a.actorRole||'',
     (a.action||'').replace(/_/g,' '), a.description||''
   ]));
   const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
@@ -5120,7 +5152,7 @@ document.addEventListener('click', async function(e){
     case 'export-college-dir': openExportFormatModal('Export College Directory', '/admin/colleges/export'); break;
     case 'export-college-report': openExportFormatModal(`Export Report — ${(COLLEGES.find(x=>x.id===id)||{}).name||''}`, `/admin/reports/college/${encodeURIComponent(id)}/export`); break;
     case 'export-student-report': openExportFormatModal(`Export Report — ${(STUDENTS.find(x=>x.id===id)||{}).name||''}`, `/admin/reports/student/${encodeURIComponent(id)}/export`); break;
-    case 'export-overall-report': el.dataset.format ? downloadExportFile('/admin/reports/overall/export', el.dataset.format) : openExportFormatModal('Export Platform Report', '/admin/reports/overall/export'); break;
+    case 'export-overall-report': { const ep = overallReportExportEndpoint(); el.dataset.format ? downloadExportFile(ep, el.dataset.format) : openExportFormatModal('Export Platform Report', ep); break; }
     case 'report-export': { openReportExportModal(el.dataset.report); break; }
     case 'report-export-now': { reportExportNow(el.dataset.kind); break; }
 case 'export-audit': exportAuditCSV(); break;

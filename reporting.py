@@ -178,13 +178,15 @@ def attendance_counts_for_date(db, date_str):
     return {"total": present + absent, "present": present, "absent": absent}
 
 
-def overall_report_rows(db, users, student_oid=None, quiz_ids=None, college=None, colleges=None):
+def overall_report_rows(db, users, student_oid=None, quiz_ids=None, college=None,
+                         colleges=None, department=None):
     """Shared row builder for the Overall Report JSON + all of its
     PDF/Excel exports. Every row is computed live from db.quiz_attempts
     + db.users.finalEmployabilityScore. Optional quiz_ids (list of
-    assessment ObjectIds), college (exact college name) and colleges
-    (list of exact college names) scope the query so the Assessment
-    Report export never has to load the whole platform attempt set."""
+    assessment ObjectIds), college (exact college name), colleges
+    (list of exact college names) and department (exact department name)
+    scope the query so the Overall/Assessment Report exports never have
+    to load — or download — more than the caller actually selected."""
     query = {"status": "submitted"}
     if student_oid:
         query["studentId"] = student_oid
@@ -194,6 +196,8 @@ def overall_report_rows(db, users, student_oid=None, quiz_ids=None, college=None
         query["college"] = college
     if colleges:
         query["college"] = {"$in": list(colleges)}
+    if department:
+        query["department"] = department
     attempts = list(db.quiz_attempts.find(query).sort("submittedAt", -1))
     user_scores = {}
     if student_oid:

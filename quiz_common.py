@@ -121,8 +121,14 @@ def ist_from_utc(dt):
     return dt.astimezone(IST_TZ)
 
 
-def fmt_ist(dt, fmt="%Y-%m-%d %H:%M"):
-    """IST display string for a stored UTC datetime, or None."""
+def fmt_ist(dt, fmt="%d/%m/%Y %H:%M:%S"):
+    """IST display string for a stored UTC datetime, or None. Default
+    format is the platform-wide Super Admin standard: 24-hour railway
+    format, DD/MM/YYYY HH:mm:ss (e.g. 11/08/2026 14:35:27) — never
+    AM/PM, never UTC. Every "Generated On" timestamp in the Super
+    Admin reports/PDFs/marksheets, and every *_AtIST field returned to
+    the frontend, funnels through this one function so the format can
+    never drift between call sites."""
     ist = ist_from_utc(dt)
     return ist.strftime(fmt) if ist else None
 
